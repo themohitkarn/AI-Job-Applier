@@ -92,6 +92,9 @@ async def list_applications(db: AsyncSession = Depends(get_db)) -> List[Dict[str
             "job_id": app.job_id,
             "job_title": job.title,
             "company": job.company,
+            "location": job.location,
+            "source": job.source,
+            "application_url": job.application_url,
             "status": app.status,
             "requires_approval": app.requires_approval,
             "is_user_approved": app.is_user_approved,
@@ -102,6 +105,18 @@ async def list_applications(db: AsyncSession = Depends(get_db)) -> List[Dict[str
             "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
         })
     return output
+
+
+@router.delete("/{app_id}", summary="Delete or dismiss an application record")
+async def delete_application(app_id: int, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+    """Delete or dismiss a tracked application record."""
+    stmt = select(Application).where(Application.id == app_id)
+    app_record = (await db.execute(stmt)).scalar_one_or_none()
+    if not app_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    await db.delete(app_record)
+    await db.commit()
+    return {"success": True, "message": f"Application {app_id} deleted successfully"}
 
 
 @router.get("/{app_id}", summary="Get application details and audit log")

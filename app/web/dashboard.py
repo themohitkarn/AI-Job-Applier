@@ -646,32 +646,75 @@ Ingestion Summary across Enabled Sources:
       const container = document.getElementById('apps-container');
       container.innerHTML = '';
       if (!data || data.length === 0) {
-        container.innerHTML = '<div class="card p-6 text-center text-slate-400">No applications initiated yet.</div>';
+        container.innerHTML = '<div class="card p-6 text-center text-slate-400">No applications initiated yet. Discover jobs in the "Discovered Jobs" tab and click "Auto-Apply (Dry-Run)" or "Check Match"!</div>';
         return;
       }
       data.forEach(app => {
         const item = document.createElement('div');
-        item.className = 'card p-5 flex flex-col md:flex-row md:items-center justify-between gap-4';
+        item.className = 'card p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-slate-700/60 hover:border-slate-600 transition';
+
+        let statusBadgeClass = 'bg-slate-800 text-slate-300 border-slate-700';
+        if (app.status === 'READY_FOR_APPROVAL') statusBadgeClass = 'bg-amber-950 text-amber-300 border-amber-800';
+        else if (app.status === 'APPLIED' || app.status === 'SUBMITTED') statusBadgeClass = 'bg-emerald-950 text-emerald-300 border-emerald-800';
+        else if (app.status === 'MANUAL_ACTION_REQUIRED') statusBadgeClass = 'bg-orange-950 text-orange-300 border-orange-800';
+        else if (app.status === 'FAILED') statusBadgeClass = 'bg-rose-950 text-rose-300 border-rose-800';
+        else if (app.status === 'DISCOVERED') statusBadgeClass = 'bg-sky-950 text-sky-300 border-sky-800';
+
         item.innerHTML = `
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="badge bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(app.status)}</span>
-              <span class="text-xs text-slate-400">${escapeHtml(app.created_at || '')}</span>
+          <div class="space-y-1.5 flex-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="badge ${statusBadgeClass} text-xs font-semibold px-2 py-0.5 rounded border">${escapeHtml(app.status)}</span>
+              ${app.source ? `<span class="badge bg-slate-800 text-slate-400 text-xs px-2 py-0.5 rounded border border-slate-700 uppercase">${escapeHtml(app.source)}</span>` : ''}
+              <span class="text-xs text-slate-500">${escapeHtml(app.created_at || '')}</span>
             </div>
             <h3 class="text-lg font-bold text-white mt-1">${escapeHtml(app.job_title)}</h3>
-            <p class="text-sm text-slate-300">${escapeHtml(app.company)}</p>
-            <p class="text-xs text-slate-400 mt-1">Last Step: ${escapeHtml(app.last_step || 'Discovered')}</p>
+            <p class="text-sm text-slate-300 font-medium">${escapeHtml(app.company)} ${app.location ? `<span class="text-xs text-slate-500">• ${escapeHtml(app.location)}</span>` : ''}</p>
+            <p class="text-xs text-slate-400">Step: <span class="text-slate-300">${escapeHtml(app.last_step || 'Discovered')}</span></p>
+            ${app.confirmation_reference ? `<p class="text-xs text-emerald-400"><i class="fa-solid fa-circle-check mr-1"></i> Reference: ${escapeHtml(app.confirmation_reference)}</p>` : ''}
+            ${app.error_message ? `<p class="text-xs text-rose-400"><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${escapeHtml(app.error_message)}</p>` : ''}
           </div>
-          <div class="flex items-center gap-3">
-            ${app.status === 'READY_FOR_APPROVAL' ? `
-              <button onclick="confirmSubmit(${app.id}, ${app.job_id})" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded text-sm transition">
-                <i class="fa-solid fa-check-double mr-1.5"></i> Approve & Submit
+          <div class="flex items-center gap-2 flex-wrap md:flex-nowrap">
+            ${app.application_url ? `
+              <a href="${escapeHtml(app.application_url)}" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium transition flex items-center gap-1.5 whitespace-nowrap">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> Open Career Link
+              </a>
+            ` : ''}
+            ${app.status === 'DISCOVERED' ? `
+              <button onclick="prepareApply(${app.job_id})" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3.5 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
+                <i class="fa-solid fa-play"></i> Auto-Fill (Dry-Run)
               </button>
             ` : ''}
+            ${app.status === 'READY_FOR_APPROVAL' ? `
+              <button onclick="confirmSubmit(${app.id}, ${app.job_id})" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
+                <i class="fa-solid fa-check-double"></i> Approve & Submit
+              </button>
+            ` : ''}
+            ${app.status === 'MANUAL_ACTION_REQUIRED' ? `
+              <a href="${escapeHtml(app.application_url || '#')}" target="_blank" class="bg-amber-600 hover:bg-amber-500 text-white font-medium px-3 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
+                <i class="fa-solid fa-user-shield"></i> Solve Challenge in Browser
+              </a>
+            ` : ''}
+            <button onclick="deleteApplication(${app.id})" class="text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 p-2 rounded transition" title="Dismiss / Delete">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
           </div>
         `;
         container.appendChild(item);
       });
+    }
+
+    async function deleteApplication(appId) {
+      if (!confirm("Are you sure you want to dismiss this application record?")) return;
+      try {
+        const res = await fetch(`/api/v1/applications/${appId}`, { method: 'DELETE' });
+        if (res.ok) {
+          loadApplications();
+        } else {
+          alert("Failed to delete application.");
+        }
+      } catch (err) {
+        alert("Error deleting application: " + err.message);
+      }
     }
 
     async function loadProfile() {

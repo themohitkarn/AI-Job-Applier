@@ -165,3 +165,57 @@ async def test_ai_health_endpoint_diagnostics():
         assert "status" in data
         assert "provider" in data
         assert "gsk_" not in str(data)  # Never expose Groq keys in response!
+
+
+@pytest.mark.asyncio
+async def test_applications_list_and_delete_endpoints(test_db_session):
+    """Verify applications listing returns job metadata and DELETE removes record."""
+    from app.db.models import Application, JobListing
+    from app.db.session import get_db
+
+    app.dependency_overrides[get_db] = lambda: test_db_session
+    try:
+        job = JobListing(
+            title="AI Application Engineer",
+            company="DeepMind Partner",
+            location="Remote",
+            description="Agentic AI development.",
+            application_url="https://example.com/apply/deepmind",
+            fingerprint="fp_app_test_123",
+            source="greenhouse",
+        )
+        test_db_session.add(job)
+        await test_db_session.commit()
+        await test_db_session.refresh(job)
+
+        application = Application(
+            job_id=job.id,
+            status="DISCOVERED",
+            last_step="Discovered",
+        )
+        test_db_session.add(application)
+        await test_db_session.commit()
+        await test_db_session.refresh(application)
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # 1. GET list
+            list_res = await client.get("/api/v1/applications")
+            assert list_res.status_code == 200
+            data = list_res.json()
+            matched = [a for a in data if a["id"] == application.id]
+            assert len(matched) == 1
+            assert matched[0]["application_url"] == "https://example.com/apply/deepmind"
+            assert matched[0]["company"] == "DeepMind Partner"
+
+            # 2. DELETE
+            del_res = await client.delete(f"/api/v1/applications/{application.id}")
+            assert del_res.status_code == 200
+            assert del_res.json()["success"] is True
+
+            # 3. GET after DELETE
+            list_after = await client.get("/api/v1/applications")
+            assert not any(a["id"] == application.id for a in list_after.json())
+    finally:
+        app.dependency_overrides.clear()
+
