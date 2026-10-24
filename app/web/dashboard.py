@@ -500,7 +500,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           if (s.error) line += ` [Error: ${s.error}]`;
           return line;
         });
-        alert(`Job Synchronization Finished!\n\nIngestion Summary across Enabled Sources:\n\n${lines.join('\n')}`);
+        const summaryText = lines.join(`
+`);
+        alert(`Job Synchronization Finished!
+
+Ingestion Summary across Enabled Sources:
+
+` + summaryText);
         loadJobs();
       } catch (err) {
         alert(`Job synchronization failed: ${err.message}`);
