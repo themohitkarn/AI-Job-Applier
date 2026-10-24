@@ -2,12 +2,14 @@
 import json
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
-from sqlalchemy import func, select, or_, and_
+from sqlalchemy import func, select, or_, and_, case
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.db.models import JobListing, JobSyncRecord
+from app.core.text_cleaner import clean_html_description
+from app.db.models import JobListing, JobMatch, JobSyncRecord
 from app.jobs.dedup import compute_job_fingerprint, normalize_job_url
 from app.jobs.link_importer import fetch_and_parse_job_url
 from app.jobs.registry import get_job_registry
@@ -25,11 +27,15 @@ class JobService:
         self.registry = get_job_registry()
 
     async def save_or_update_job(self, job_data: JobListingCreate) -> Tuple[JobListing, bool]:
-        """Deduplicate and insert or update job vacancy record."""
+        """Deduplicate and insert or update job vacancy record with cleaned descriptions."""
         norm_url = normalize_job_url(job_data.application_url)
+        clean_title = clean_html_description(job_data.title)
+        clean_company = clean_html_description(job_data.company)
+        clean_desc = clean_html_description(job_data.description)
+
         fingerprint = compute_job_fingerprint(
-            company=job_data.company,
-            title=job_data.title,
+            company=clean_company,
+            title=clean_title,
             location=job_data.location,
             external_id=job_data.external_id,
             url=norm_url,
@@ -40,6 +46,9 @@ class JobService:
 
         if existing:
             existing.updated_at = datetime.now(timezone.utc)
+            # Ensure existing record descriptions are free of raw HTML tags
+            if "<" in existing.description or "&" in existing.description:
+                existing.description = clean_html_description(existing.description)
             await self.db.commit()
             await self.db.refresh(existing)
             return existing, False
@@ -47,15 +56,15 @@ class JobService:
         new_job = JobListing(
             source=job_data.source,
             external_id=job_data.external_id,
-            title=job_data.title,
-            company=job_data.company,
+            title=clean_title,
+            company=clean_company,
             location=job_data.location,
             employment_type=job_data.employment_type,
             experience_level=job_data.experience_level,
             salary_min=job_data.salary_min,
             salary_max=job_data.salary_max,
             salary_currency=job_data.salary_currency or "USD",
-            description=job_data.description,
+            description=clean_desc,
             requirements=json.dumps(job_data.requirements),
             application_url=norm_url,
             posted_date=job_data.posted_date or datetime.now(timezone.utc),
@@ -67,6 +76,35 @@ class JobService:
         await self.db.commit()
         await self.db.refresh(new_job)
         return new_job, True
+
+    async def clean_stored_descriptions(self) -> int:
+        """Scan all stored job listings in database and clean any raw HTML markup."""
+        stmt = select(JobListing).where(
+            or_(
+                JobListing.description.like("%<%"),
+                JobListing.description.like("%&%"),
+                JobListing.title.like("%<%"),
+            )
+        )
+        result = await self.db.execute(stmt)
+        listings = result.scalars().all()
+        cleaned_count = 0
+        for job in listings:
+            cleaned_desc = clean_html_description(job.description)
+            cleaned_title = clean_html_description(job.title)
+            changed = False
+            if cleaned_desc != job.description:
+                job.description = cleaned_desc
+                changed = True
+            if cleaned_title != job.title:
+                job.title = cleaned_title
+                changed = True
+            if changed:
+                cleaned_count += 1
+        if cleaned_count > 0:
+            await self.db.commit()
+            logger.info(f"Cleaned raw HTML descriptions for {cleaned_count} existing job records.")
+        return cleaned_count
 
     async def sync_all_enabled_sources(self) -> List[JobSyncRecord]:
         """Fetch and synchronize jobs across all configured and enabled connectors."""
@@ -86,6 +124,9 @@ class JobService:
         sync_rec = JobSyncRecord(
             source=connector.name,
             jobs_fetched=0,
+            jobs_parsed=0,
+            jobs_rejected=0,
+            jobs_duplicate=0,
             jobs_added=0,
             status="RUNNING",
             sync_started_at=datetime.now(timezone.utc),
@@ -99,19 +140,29 @@ class JobService:
                 location=self.settings.job_search_location,
                 limit=self.settings.job_connector_max_results,
             )
-            sync_rec.jobs_fetched = len(fetched_jobs)
+            parsed_count = len(fetched_jobs)
             added_count = 0
+            duplicate_count = 0
 
             for job_data in fetched_jobs:
                 _, is_new = await self.save_or_update_job(job_data)
                 if is_new:
                     added_count += 1
+                else:
+                    duplicate_count += 1
 
+            sync_rec.jobs_fetched = parsed_count
+            sync_rec.jobs_parsed = parsed_count
             sync_rec.jobs_added = added_count
+            sync_rec.jobs_duplicate = duplicate_count
+            sync_rec.jobs_rejected = 0
             sync_rec.status = "SUCCESS"
             sync_rec.sync_completed_at = datetime.now(timezone.utc)
             await self.db.commit()
-            logger.info(f"Sync complete for {connector.name}: {added_count} new jobs saved.")
+            logger.info(
+                f"Sync complete for {connector.name}: {parsed_count} fetched/parsed, "
+                f"{added_count} newly saved, {duplicate_count} duplicate."
+            )
             return sync_rec
 
         except Exception as e:
@@ -141,8 +192,8 @@ class JobService:
         return await self.save_or_update_job(parsed_job)
 
     async def search_jobs(self, filters: JobListingFilter) -> Tuple[List[JobListing], int]:
-        """Search and paginate job vacancies with criteria."""
-        query = select(JobListing)
+        """Search and paginate job vacancies with criteria, work mode, and entry-level sorting."""
+        query = select(JobListing).options(selectinload(JobListing.matches))
 
         if filters.query:
             term = f"%{filters.query}%"
@@ -227,8 +278,39 @@ class JobService:
         count_query = select(func.count()).select_from(query.subquery())
         total = (await self.db.execute(count_query)).scalar() or 0
 
-        # Pagination
-        query = query.order_by(JobListing.posted_date.desc().nullslast())
+        # Pagination & Sorting
+        if filters.sort_by == "fresher_first":
+            fresher_order = case(
+                (JobListing.title.ilike("%intern%"), 1),
+                (JobListing.title.ilike("%fresher%"), 1),
+                (JobListing.title.ilike("%trainee%"), 1),
+                (JobListing.title.ilike("%graduate%"), 1),
+                (JobListing.experience_level.ilike("%intern%"), 1),
+                (JobListing.title.ilike("%junior%"), 2),
+                (JobListing.title.ilike("%entry%"), 2),
+                (JobListing.experience_level.ilike("%entry%"), 2),
+                (JobListing.title.ilike("%senior%"), 5),
+                (JobListing.title.ilike("%lead%"), 5),
+                (JobListing.title.ilike("%principal%"), 5),
+                (JobListing.title.ilike("%staff%"), 5),
+                (JobListing.title.ilike("%director%"), 5),
+                else_=3,
+            )
+            query = query.order_by(fresher_order.asc(), JobListing.posted_date.desc().nullslast())
+        elif filters.sort_by == "relevance":
+            relevance_order = case(
+                (JobListing.title.ilike("%intern%"), 1),
+                (JobListing.title.ilike("%fresher%"), 1),
+                (JobListing.title.ilike("%junior%"), 2),
+                (JobListing.title.ilike("%entry%"), 2),
+                (JobListing.title.ilike("%senior%"), 4),
+                (JobListing.title.ilike("%lead%"), 4),
+                else_=3,
+            )
+            query = query.order_by(relevance_order.asc(), JobListing.posted_date.desc().nullslast())
+        else:
+            query = query.order_by(JobListing.posted_date.desc().nullslast())
+
         offset = (filters.page - 1) * filters.page_size
         query = query.offset(offset).limit(filters.page_size)
 
@@ -240,3 +322,21 @@ class JobService:
         """Retrieve a specific job by database ID."""
         stmt = select(JobListing).where(JobListing.id == job_id)
         return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def clean_stored_descriptions(self) -> int:
+        """Sanitize raw HTML and normalize whitespace across all stored job descriptions in-place."""
+        stmt = select(JobListing)
+        result = await self.db.execute(stmt)
+        jobs = result.scalars().all()
+        updated = 0
+        for job in jobs:
+            if not job.description:
+                continue
+            cleaned = clean_html_description(job.description)
+            if cleaned != job.description:
+                job.description = cleaned
+                updated += 1
+        if updated > 0:
+            await self.db.commit()
+            logger.info(f"Cleaned {updated} stored job descriptions in-place.")
+        return updated

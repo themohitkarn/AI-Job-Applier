@@ -94,20 +94,25 @@ class GroqProvider(AIProvider):
                 "total_available_models": len(available_ids),
             }
         except AuthenticationError as e:
+            logger.warning("Groq authentication failed (401 Unauthorized). Check GROQ_API_KEY in .env.")
             return {
                 "provider": "groq",
                 "status": "unhealthy",
                 "configured": True,
                 "model": self._model,
-                "error": "Authentication failed: Invalid GROQ_API_KEY.",
+                "http_status": 401,
+                "error": "Authentication failed: 401 Unauthorized (Invalid GROQ_API_KEY).",
+                "actionable_message": "Your GROQ_API_KEY was rejected by Groq. Please verify or update your key in .env from https://console.groq.com/keys.",
             }
         except Exception as e:
+            logger.error(f"Groq health check connection error: {e}")
             return {
                 "provider": "groq",
                 "status": "unhealthy",
                 "configured": True,
                 "model": self._model,
                 "error": f"Connection error: {str(e)}",
+                "actionable_message": "Ensure network connectivity and that Groq services are operational.",
             }
 
     async def generate_text(

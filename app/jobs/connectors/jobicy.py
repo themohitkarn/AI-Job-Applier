@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.logging import get_logger
+from app.core.text_cleaner import clean_html_description
 from app.jobs.connector_base import BaseJobConnector, SourceCapability
 from app.jobs.schemas import JobListingCreate
 
@@ -101,17 +102,30 @@ class JobicyConnector(BaseJobConnector):
                     sal_min = float(item["annualSalaryMin"]) if item.get("annualSalaryMin") else None
                     sal_max = float(item["annualSalaryMax"]) if item.get("annualSalaryMax") else None
 
+                    clean_title = clean_html_description(title.strip())
+                    clean_company = clean_html_description(company.strip())
+                    clean_desc = clean_html_description(item.get("jobDescription") or f"Position: {clean_title} at {clean_company}")
+
+                    # Safely handle jobIndustry whether it's a list or string
+                    job_ind = item.get("jobIndustry")
+                    if isinstance(job_ind, list):
+                        clean_reqs = [clean_html_description(str(x)) for x in job_ind if str(x).strip()]
+                    elif isinstance(job_ind, str) and job_ind.strip():
+                        clean_reqs = [clean_html_description(job_ind)]
+                    else:
+                        clean_reqs = []
+
                     job = JobListingCreate(
-                        title=title.strip(),
-                        company=company.strip(),
+                        title=clean_title,
+                        company=clean_company,
                         location=item.get("jobGeo") or "Remote",
                         employment_type=item.get("jobType") or "Full-time",
                         experience_level=item.get("jobLevel") or "Mid-level",
                         salary_min=sal_min,
                         salary_max=sal_max,
                         salary_currency=item.get("salaryCurrency") or "USD",
-                        description=item.get("jobDescription") or f"Position: {title} at {company}",
-                        requirements=[item.get("jobIndustry")] if item.get("jobIndustry") else [],
+                        description=clean_desc,
+                        requirements=clean_reqs,
                         application_url=url,
                         posted_date=pub_date,
                         source=self.name,

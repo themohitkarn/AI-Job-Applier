@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.logging import get_logger
+from app.core.text_cleaner import clean_html_description
 from app.jobs.connector_base import BaseJobConnector, SourceCapability
 from app.jobs.schemas import JobListingCreate
 
@@ -103,15 +104,19 @@ class ArbeitnowConnector(BaseJobConnector):
                     url = item.get("url") or ""
                     loc = item.get("location") or ("Remote" if item.get("remote") else "On-site")
 
+                    clean_title = clean_html_description(title.strip())
+                    clean_company = clean_html_description(company.strip())
+                    clean_desc = clean_html_description(desc)
+
                     job = JobListingCreate(
-                        title=title.strip(),
-                        company=company.strip(),
+                        title=clean_title,
+                        company=clean_company,
                         location=loc,
                         employment_type="Full-time",
                         experience_level="Mid-level",
                         salary_currency="USD",
-                        description=desc,
-                        requirements=tags,
+                        description=clean_desc,
+                        requirements=[clean_html_description(t) for t in tags],
                         application_url=url,
                         posted_date=posted_date,
                         source=self.name,

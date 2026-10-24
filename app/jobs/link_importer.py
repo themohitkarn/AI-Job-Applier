@@ -13,6 +13,7 @@ import httpx
 
 from app.core.logging import get_logger
 from app.core.security import validate_external_url
+from app.core.text_cleaner import clean_html_description
 from app.jobs.dedup import normalize_job_url
 from app.jobs.schemas import JobListingCreate
 
@@ -49,18 +50,7 @@ def detect_source_from_url(url: str) -> str:
 
 def strip_html_tags(html_text: str) -> str:
     """Convert HTML string to clean plain text."""
-    if not html_text:
-        return ""
-    # Replace breaks and paragraphs with newlines
-    text = re.sub(r"<(?:br|p|div|li)[^>]*>", "\n", html_text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"&nbsp;", " ", text)
-    text = re.sub(r"&amp;", "&", text)
-    text = re.sub(r"&lt;", "<", text)
-    text = re.sub(r"&gt;", ">", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n\s*\n+", "\n\n", text)
-    return text.strip()
+    return clean_html_description(html_text)
 
 
 def extract_json_ld_job(html: str) -> Optional[Dict[str, Any]]:

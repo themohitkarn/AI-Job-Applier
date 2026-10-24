@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.logging import get_logger
+from app.core.text_cleaner import clean_html_description
 from app.jobs.connector_base import BaseJobConnector, SourceCapability
 from app.jobs.schemas import JobListingCreate
 
@@ -109,16 +110,20 @@ class RemoteOKConnector(BaseJobConnector):
                     salary_min = float(item.get("salary_min")) if item.get("salary_min") else None
                     salary_max = float(item.get("salary_max")) if item.get("salary_max") else None
 
+                    clean_title = clean_html_description(title.strip())
+                    clean_company = clean_html_description(company.strip())
+                    clean_desc = clean_html_description(item.get("description") or f"Role: {clean_title} at {clean_company}. Tags: {', '.join(tags)}")
+
                     job = JobListingCreate(
-                        title=title.strip(),
-                        company=company.strip(),
+                        title=clean_title,
+                        company=clean_company,
                         location=item.get("location") or "Remote",
                         employment_type="Full-time",
                         experience_level="Mid-level",
                         salary_min=salary_min,
                         salary_max=salary_max,
                         salary_currency="USD",
-                        description=item.get("description") or f"Role: {title} at {company}. Tags: {', '.join(tags)}",
+                        description=clean_desc,
                         requirements=tags,
                         application_url=url,
                         posted_date=posted_date,

@@ -39,6 +39,14 @@ async def init_db() -> None:
     logger.info("Initializing database schemas...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Safely migrate new columns to job_sync_records if using SQLite
+        if "sqlite" in settings.database_url:
+            from sqlalchemy import text
+            for col in ["jobs_parsed", "jobs_rejected", "jobs_duplicate"]:
+                try:
+                    await conn.execute(text(f"ALTER TABLE job_sync_records ADD COLUMN {col} INTEGER DEFAULT 0"))
+                except Exception:
+                    pass  # Column already exists
     logger.info("Database schemas initialized successfully.")
 
 

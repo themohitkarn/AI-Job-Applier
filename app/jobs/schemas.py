@@ -45,6 +45,7 @@ class JobListingFilter(BaseModel):
     source: Optional[str] = None
     min_salary: Optional[float] = None
     status: Optional[str] = "active"
+    sort_by: Optional[str] = Field(default="newest", description="Sorting order: newest, fresher_first, relevance")
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 

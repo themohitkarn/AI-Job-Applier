@@ -85,6 +85,7 @@ async def list_jobs(
     source: Optional[str] = Query(None),
     min_salary: Optional[float] = Query(None),
     status: Optional[str] = Query("active"),
+    sort_by: Optional[str] = Query("newest", description="Sorting order: newest, fresher_first, relevance"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -97,6 +98,7 @@ async def list_jobs(
         source=source,
         min_salary=min_salary,
         status=status,
+        sort_by=sort_by,
         page=page,
         page_size=page_size,
     )
@@ -105,6 +107,7 @@ async def list_jobs(
 
     job_responses = []
     for j in items:
+        latest_match = j.matches[-1] if (hasattr(j, "matches") and j.matches) else None
         job_responses.append({
             "id": j.id,
             "title": j.title,
@@ -124,6 +127,8 @@ async def list_jobs(
             "external_id": j.external_id,
             "fingerprint": j.fingerprint,
             "status": j.status,
+            "match_score": latest_match.overall_score if latest_match else None,
+            "match_status": latest_match.status if latest_match else None,
             "created_at": j.created_at.isoformat() if j.created_at else None,
             "updated_at": j.updated_at.isoformat() if j.updated_at else None,
         })
@@ -175,6 +180,9 @@ async def sync_jobs(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
             {
                 "source": r.source,
                 "fetched": r.jobs_fetched,
+                "parsed": getattr(r, "jobs_parsed", 0),
+                "rejected": getattr(r, "jobs_rejected", 0),
+                "duplicate": getattr(r, "jobs_duplicate", 0),
                 "added": r.jobs_added,
                 "status": r.status,
                 "error": r.error_message,
@@ -192,6 +200,9 @@ async def sync_source_jobs(source: str, db: AsyncSession = Depends(get_db)) -> D
         return {
             "source": rec.source,
             "fetched": rec.jobs_fetched,
+            "parsed": getattr(rec, "jobs_parsed", 0),
+            "rejected": getattr(rec, "jobs_rejected", 0),
+            "duplicate": getattr(rec, "jobs_duplicate", 0),
             "added": rec.jobs_added,
             "status": rec.status,
             "error": rec.error_message,

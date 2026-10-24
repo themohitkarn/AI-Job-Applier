@@ -128,6 +128,8 @@ class MatchingEngine:
         # 5. Experience Years Extraction & Comparison
         exp_match = re.search(r"(\d+)\+?\s*(?:-\s*\d+\s*)?years?(?:\s+of)?(?:\s+[\w\-]+){0,3}\s+experience", job_text)
         required_exp = float(exp_match.group(1)) if exp_match else None
+        title_lower = job_title.lower()
+        is_senior = any(s in title_lower for s in ["senior", "lead", "principal", "staff", "director", "head", "manager"])
 
         missing_criteria: List[str] = [f"Missing required skill: {s}" for s in missing_mandatory[:5]]
         positive_matches: List[str] = [f"Matched technical skill: {s}" for s in direct_matches]
@@ -158,8 +160,10 @@ class MatchingEngine:
                 missing_criteria.append(f"Strict experience requirement unmet: requires {req_str} yrs, candidate has {candidate_exp_years} yrs.")
         else:
             # Unspecified experience requirement: do not penalize regular roles without senior in title
-            title_lower = job_title.lower()
-            if any(s in title_lower for s in ["senior", "lead", "principal", "staff", "director", "head", "manager"]):
+            if is_senior and candidate_exp_years <= 2.0:
+                exp_score = 30.0
+                missing_criteria.append("Senior/Leadership position: candidate is early-career (0-2 yrs).")
+            elif is_senior:
                 exp_score = 50.0
                 missing_criteria.append("Senior/Leadership title indicated without explicit year threshold.")
             else:
@@ -201,6 +205,16 @@ class MatchingEngine:
             rationale = f"Mandatory experience threshold of {req_str} years is significantly above candidate's {candidate_exp_years} years."
             if rationale not in missing_criteria:
                 missing_criteria.append(rationale)
+        elif is_senior and candidate_exp_years <= 2.0:
+            # Senior roles are lower priority and not automatically eligible for entry-level / fresher candidates
+            if overall >= min_threshold:
+                status = EligibilityStatus.NEEDS_REVIEW
+                rationale = "Senior/Staff level position with junior or entry-level candidate experience. Manual review required."
+            else:
+                status = EligibilityStatus.INELIGIBLE
+                rationale = "Senior/Staff level requirements exceed candidate's entry-level experience background."
+            if "Role targets senior or leadership level" not in missing_criteria:
+                missing_criteria.append("Role targets senior or leadership level")
         elif total_matched == 0 and overall < min_threshold:
             status = EligibilityStatus.INELIGIBLE
             rationale = "Candidate qualifications and skills do not sufficiently align with job requirements."

@@ -5,6 +5,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.text_cleaner import clean_html_description
 from app.jobs.connector_base import BaseJobConnector, SourceCapability
 from app.jobs.schemas import JobListingCreate
 
@@ -122,13 +123,13 @@ class LeverConnector(BaseJobConnector):
                         app_url = j.get("applyUrl") or j.get("hostedUrl") or ""
 
                         job = JobListingCreate(
-                            title=title.strip(),
-                            company=company_name,
+                            title=clean_html_description(title.strip()),
+                            company=clean_html_description(company_name),
                             location=loc_name,
                             employment_type=categories.get("commitment") or "Full-time",
                             experience_level="Mid-level",
-                            description=desc,
-                            requirements=[categories.get("team")] if categories.get("team") else [],
+                            description=clean_html_description(desc),
+                            requirements=[clean_html_description(categories.get("team"))] if categories.get("team") else [],
                             application_url=app_url,
                             posted_date=datetime.now(timezone.utc),
                             source=self.name,

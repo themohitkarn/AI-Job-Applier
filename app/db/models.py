@@ -183,6 +183,9 @@ class JobSyncRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     source = Column(String(100), nullable=False, index=True)
     jobs_fetched = Column(Integer, default=0)
+    jobs_parsed = Column(Integer, default=0)
+    jobs_rejected = Column(Integer, default=0)
+    jobs_duplicate = Column(Integer, default=0)
     jobs_added = Column(Integer, default=0)
     status = Column(String(50), default="PENDING")  # SUCCESS, FAILED, PARTIAL
     error_message = Column(Text, nullable=True)

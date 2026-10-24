@@ -109,3 +109,25 @@ async def test_fallback_provider_execution():
     assert result == "Recovered via Ollama text"
     assert primary_mock.generate_text.called
     assert secondary_mock.generate_text.called
+
+
+@pytest.mark.asyncio
+async def test_groq_401_authentication_error_health():
+    """Verify 401 AuthenticationError produces actionable unhealthy health report."""
+    from groq import AuthenticationError
+
+    provider = GroqProvider(api_key="gsk_invalid_test_key", model="llama-3.3-70b-versatile")
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_client.models.list = AsyncMock(
+        side_effect=AuthenticationError("Invalid API Key", response=mock_response, body={"error": {"code": "invalid_api_key"}})
+    )
+    provider._client = mock_client
+
+    health = await provider.check_health()
+    assert health["status"] == "unhealthy"
+    assert health["http_status"] == 401
+    assert "401 Unauthorized" in health["error"]
+    assert "actionable_message" in health
+    assert "https://console.groq.com/keys" in health["actionable_message"]

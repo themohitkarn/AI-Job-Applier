@@ -5,6 +5,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.text_cleaner import clean_html_description
 from app.jobs.connector_base import BaseJobConnector, SourceCapability
 from app.jobs.schemas import JobListingCreate
 
@@ -87,6 +88,7 @@ class GreenhouseConnector(BaseJobConnector):
             return results
 
         keyword_tokens = [k.lower().strip() for k in (keywords or "").split(",") if k.strip()]
+        per_board_limit = max(10, limit // max(1, len(boards)))
 
         async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": self.USER_AGENT}) as client:
             for board in boards:
@@ -102,29 +104,32 @@ class GreenhouseConnector(BaseJobConnector):
                     data = resp.json()
                     jobs_data = data.get("jobs", [])
                     company_name = board.capitalize()
+                    board_added = 0
 
                     for j in jobs_data:
                         title = j.get("title") or ""
                         if not title:
                             continue
 
-                        desc = j.get("content") or ""
+                        raw_desc = j.get("content") or ""
+                        clean_desc = clean_html_description(raw_desc)
+                        clean_title = clean_html_description(title.strip())
                         loc_name = (j.get("location") or {}).get("name") or "Remote"
 
                         # Filter by keyword if provided
-                        combined = f"{title} {desc} {loc_name}".lower()
+                        combined = f"{clean_title} {clean_desc} {loc_name}".lower()
                         if keyword_tokens and not any(kw in combined for kw in keyword_tokens):
                             continue
 
                         app_url = j.get("absolute_url") or f"https://boards.greenhouse.io/{board}/jobs/{j.get('id')}"
 
                         job = JobListingCreate(
-                            title=title.strip(),
+                            title=clean_title,
                             company=company_name,
                             location=loc_name,
                             employment_type="Full-time",
                             experience_level="Mid-level",
-                            description=desc,
+                            description=clean_desc,
                             requirements=[],
                             application_url=app_url,
                             posted_date=datetime.now(timezone.utc),
@@ -132,7 +137,8 @@ class GreenhouseConnector(BaseJobConnector):
                             external_id=str(j.get("id", "")),
                         )
                         results.append(job)
-                        if len(results) >= limit:
+                        board_added += 1
+                        if len(results) >= limit or board_added >= per_board_limit:
                             break
 
                 except Exception as e:

@@ -49,3 +49,35 @@ def test_deterministic_matching_needs_review(test_db_session):
         job_requirements=["Rust", "Python"],
     )
     assert result.status == EligibilityStatus.NEEDS_REVIEW
+
+
+def test_senior_role_lowered_priority_for_fresher(test_db_session):
+    """Candidate with 0-1 years applying to Senior role is not marked STRONG_MATCH."""
+    engine = MatchingEngine(test_db_session)
+    result = engine._deterministic_evaluation(
+        candidate_skills=["Python", "FastAPI", "Docker", "SQL"],
+        candidate_exp_years=0.5,
+        candidate_education=["B.Tech Computer Science"],
+        job_title="Senior Python Architect",
+        job_description="Senior Python developer with extensive system design expertise.",
+        job_requirements=["Python", "FastAPI"],
+    )
+    # Even though skills matched, senior role must not be STRONG_MATCH for a fresher
+    assert result.status in (EligibilityStatus.NEEDS_REVIEW, EligibilityStatus.INELIGIBLE)
+    assert result.status != EligibilityStatus.STRONG_MATCH
+
+
+def test_fresher_job_with_missing_preferred_skills_not_discarded(test_db_session):
+    """Fresher job is not marked INELIGIBLE solely because optional/preferred skills are missing."""
+    engine = MatchingEngine(test_db_session)
+    result = engine._deterministic_evaluation(
+        candidate_skills=["Python", "FastAPI", "SQL"],
+        candidate_exp_years=0.0,
+        candidate_education=["B.Tech"],
+        job_title="Junior Python Intern / Trainee",
+        job_description="Internship opening for fresh graduates with basic Python knowledge. Knowledge of AWS or Kubernetes is a plus.",
+        job_requirements=["Python", "FastAPI"],
+    )
+    assert result.is_fresher_friendly is True
+    assert result.status in (EligibilityStatus.STRONG_MATCH, EligibilityStatus.PARTIAL_MATCH)
+    assert result.status != EligibilityStatus.INELIGIBLE
