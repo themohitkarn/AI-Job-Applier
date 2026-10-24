@@ -115,12 +115,31 @@ class JobicyConnector(BaseJobConnector):
                     else:
                         clean_reqs = []
 
+                    # Safely handle jobType, jobGeo, jobLevel whether list or string
+                    job_type_raw = item.get("jobType")
+                    if isinstance(job_type_raw, list):
+                        job_type = ", ".join(str(x) for x in job_type_raw if str(x).strip()) or "Full-time"
+                    else:
+                        job_type = str(job_type_raw).strip() if job_type_raw else "Full-time"
+
+                    job_geo_raw = item.get("jobGeo")
+                    if isinstance(job_geo_raw, list):
+                        job_geo = ", ".join(str(x) for x in job_geo_raw if str(x).strip()) or "Remote"
+                    else:
+                        job_geo = str(job_geo_raw).strip() if job_geo_raw else "Remote"
+
+                    job_level_raw = item.get("jobLevel")
+                    if isinstance(job_level_raw, list):
+                        job_level = ", ".join(str(x) for x in job_level_raw if str(x).strip()) or "Mid-level"
+                    else:
+                        job_level = str(job_level_raw).strip() if job_level_raw else "Mid-level"
+
                     job = JobListingCreate(
                         title=clean_title,
                         company=clean_company,
-                        location=item.get("jobGeo") or "Remote",
-                        employment_type=item.get("jobType") or "Full-time",
-                        experience_level=item.get("jobLevel") or "Mid-level",
+                        location=job_geo,
+                        employment_type=job_type,
+                        experience_level=job_level,
                         salary_min=sal_min,
                         salary_max=sal_max,
                         salary_currency=item.get("salaryCurrency") or "USD",

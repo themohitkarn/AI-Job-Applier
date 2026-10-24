@@ -26,7 +26,9 @@ class JobService:
         self.settings = get_settings()
         self.registry = get_job_registry()
 
-    async def save_or_update_job(self, job_data: JobListingCreate) -> Tuple[JobListing, bool]:
+    async def save_or_update_job(
+        self, job_data: JobListingCreate, commit: bool = True
+    ) -> Tuple[JobListing, bool]:
         """Deduplicate and insert or update job vacancy record with cleaned descriptions."""
         norm_url = normalize_job_url(job_data.application_url)
         clean_title = clean_html_description(job_data.title)
@@ -45,12 +47,13 @@ class JobService:
         existing = (await self.db.execute(stmt)).scalar_one_or_none()
 
         if existing:
-            existing.updated_at = datetime.now(timezone.utc)
             # Ensure existing record descriptions are free of raw HTML tags
             if "<" in existing.description or "&" in existing.description:
                 existing.description = clean_html_description(existing.description)
-            await self.db.commit()
-            await self.db.refresh(existing)
+                existing.updated_at = datetime.now(timezone.utc)
+                if commit:
+                    await self.db.commit()
+                    await self.db.refresh(existing)
             return existing, False
 
         new_job = JobListing(
@@ -73,8 +76,9 @@ class JobService:
             status="active",
         )
         self.db.add(new_job)
-        await self.db.commit()
-        await self.db.refresh(new_job)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(new_job)
         return new_job, True
 
     async def clean_stored_descriptions(self) -> int:
@@ -116,25 +120,15 @@ class JobService:
         return records
 
     async def sync_connector(self, connector_name: str) -> JobSyncRecord:
-        """Run synchronization for a single named connector."""
+        """Run synchronization for a single named connector with non-blocking HTTP fetch and batch DB persist."""
         connector = self.registry.get(connector_name)
         if not connector:
             raise ValueError(f"Job connector '{connector_name}' is not registered.")
 
-        sync_rec = JobSyncRecord(
-            source=connector.name,
-            jobs_fetched=0,
-            jobs_parsed=0,
-            jobs_rejected=0,
-            jobs_duplicate=0,
-            jobs_added=0,
-            status="RUNNING",
-            sync_started_at=datetime.now(timezone.utc),
-        )
-        self.db.add(sync_rec)
-        await self.db.flush()
+        sync_start = datetime.now(timezone.utc)
 
         try:
+            # 1. Fetch remote jobs over HTTP without holding any open database transaction
             fetched_jobs = await connector.fetch_jobs(
                 keywords=self.settings.job_search_keywords,
                 location=self.settings.job_search_location,
@@ -144,20 +138,26 @@ class JobService:
             added_count = 0
             duplicate_count = 0
 
+            # 2. Persist discovered jobs in a single rapid batch transaction
             for job_data in fetched_jobs:
-                _, is_new = await self.save_or_update_job(job_data)
+                _, is_new = await self.save_or_update_job(job_data, commit=False)
                 if is_new:
                     added_count += 1
                 else:
                     duplicate_count += 1
 
-            sync_rec.jobs_fetched = parsed_count
-            sync_rec.jobs_parsed = parsed_count
-            sync_rec.jobs_added = added_count
-            sync_rec.jobs_duplicate = duplicate_count
-            sync_rec.jobs_rejected = 0
-            sync_rec.status = "SUCCESS"
-            sync_rec.sync_completed_at = datetime.now(timezone.utc)
+            sync_rec = JobSyncRecord(
+                source=connector.name,
+                jobs_fetched=parsed_count,
+                jobs_parsed=parsed_count,
+                jobs_rejected=0,
+                jobs_duplicate=duplicate_count,
+                jobs_added=added_count,
+                status="SUCCESS",
+                sync_started_at=sync_start,
+                sync_completed_at=datetime.now(timezone.utc),
+            )
+            self.db.add(sync_rec)
             await self.db.commit()
             logger.info(
                 f"Sync complete for {connector.name}: {parsed_count} fetched/parsed, "
@@ -166,12 +166,27 @@ class JobService:
             return sync_rec
 
         except Exception as e:
-            await self.db.rollback()
-            sync_rec.status = "FAILED"
-            sync_rec.error_message = str(e)
-            sync_rec.sync_completed_at = datetime.now(timezone.utc)
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+            sync_rec = JobSyncRecord(
+                source=connector.name,
+                jobs_fetched=0,
+                jobs_parsed=0,
+                jobs_rejected=0,
+                jobs_duplicate=0,
+                jobs_added=0,
+                status="FAILED",
+                error_message=str(e),
+                sync_started_at=sync_start,
+                sync_completed_at=datetime.now(timezone.utc),
+            )
             self.db.add(sync_rec)
-            await self.db.commit()
+            try:
+                await self.db.commit()
+            except Exception:
+                pass
             logger.error(f"Sync failed for {connector_name}: {e}")
             return sync_rec
 

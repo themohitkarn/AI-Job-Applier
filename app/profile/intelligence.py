@@ -371,7 +371,9 @@ class ProfileIntelligenceService:
             last_snapshot_at=last_snap.created_at if last_snap else None,
         )
 
-    async def create_snapshot(self, profile: UserProfile, action_type: str) -> ProfileSnapshot:
+    async def create_snapshot(
+        self, profile: UserProfile, action_type: str, commit: bool = True
+    ) -> ProfileSnapshot:
         """Save a snapshot of the current profile state before modifications for undo/revert."""
         data = {
             "full_name": profile.full_name,
@@ -397,16 +399,19 @@ class ProfileIntelligenceService:
             created_at=datetime.now(timezone.utc),
         )
         self.db.add(snap)
-        await self.db.commit()
-        await self.db.refresh(snap)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(snap)
+        else:
+            await self.db.flush()
         return snap
 
     async def apply_approved_suggestions(
         self, profile: UserProfile, req: ApplySuggestionsRequest
     ) -> UserProfile:
         """Apply user-approved suggestions non-destructively with an automatic rollback snapshot."""
-        # 1. Create safety snapshot first
-        await self.create_snapshot(profile, action_type="apply_suggestions")
+        # 1. Create safety snapshot first in the same atomic transaction
+        await self.create_snapshot(profile, action_type="apply_suggestions", commit=False)
 
         # 2. Apply skill replacements (e.g. 'pyhton' -> 'Python')
         current_skills = safe_parse_list(profile.skills)

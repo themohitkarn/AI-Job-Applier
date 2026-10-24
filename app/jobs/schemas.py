@@ -1,7 +1,7 @@
 """Pydantic schemas for Job Discovery and Listings."""
 from datetime import datetime
-from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, List, Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class JobListingBase(BaseModel):
@@ -20,6 +20,36 @@ class JobListingBase(BaseModel):
     deadline: Optional[datetime] = None
     source: str = Field(..., description="Source name (e.g., remoteok, jobicy)")
     external_id: Optional[str] = None
+
+    @field_validator("employment_type", mode="before")
+    @classmethod
+    def validate_employment_type(cls, v: Any) -> str:
+        if isinstance(v, list):
+            joined = ", ".join(str(x) for x in v if str(x).strip())
+            return joined if joined else "Full-time"
+        if v is None:
+            return "Full-time"
+        return str(v).strip() or "Full-time"
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def validate_location(cls, v: Any) -> str:
+        if isinstance(v, list):
+            joined = ", ".join(str(x) for x in v if str(x).strip())
+            return joined if joined else "Remote"
+        if v is None:
+            return "Remote"
+        return str(v).strip() or "Remote"
+
+    @field_validator("experience_level", mode="before")
+    @classmethod
+    def validate_experience_level(cls, v: Any) -> str:
+        if isinstance(v, list):
+            joined = ", ".join(str(x) for x in v if str(x).strip())
+            return joined if joined else "Mid-level"
+        if v is None:
+            return "Mid-level"
+        return str(v).strip() or "Mid-level"
 
 
 class JobListingCreate(JobListingBase):

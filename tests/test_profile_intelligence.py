@@ -125,3 +125,18 @@ async def test_apply_suggestions_and_revert_undo_workflow(test_db_session):
     # Verify cannot undo again since history was consumed
     audit_final = await intel_service.audit_profile(updated, use_ai=False)
     assert audit_final.can_undo is False
+
+
+@pytest.mark.asyncio
+async def test_commit_with_retry_retries_on_locked_exception():
+    """Verify commit_with_retry catches transient lock errors and retries successfully."""
+    from app.db.session import commit_with_retry
+
+    mock_session = AsyncMock()
+    mock_session.commit.side_effect = [
+        Exception("sqlite3.OperationalError: database is locked"),
+        None,
+    ]
+    await commit_with_retry(mock_session, max_retries=3, delay=0.01)
+    assert mock_session.commit.call_count == 2
+

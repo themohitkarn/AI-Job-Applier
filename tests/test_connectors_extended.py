@@ -9,9 +9,11 @@ from app.jobs.connectors.glassdoor import GlassdoorConnector
 from app.jobs.connectors.greenhouse import GreenhouseConnector
 from app.jobs.connectors.internshala import InternshalaConnector
 from app.jobs.connectors.lever import LeverConnector
+from app.jobs.connectors.jobicy import JobicyConnector
 from app.jobs.connectors.linkedin import LinkedInConnector
 from app.jobs.connectors.smartrecruiters import SmartRecruitersConnector
 from app.jobs.registry import get_job_registry
+from app.jobs.schemas import JobListingCreate
 
 
 def test_registry_contains_all_expanded_sources():
@@ -180,3 +182,60 @@ async def test_smartrecruiters_fetch_jobs_mock():
             assert len(jobs) == 1
             assert jobs[0].title == "Cloud DevOps Engineer"
             assert jobs[0].source == "smartrecruiters"
+
+
+@pytest.mark.asyncio
+async def test_jobicy_fetch_jobs_with_list_fields_mock():
+    """Verify Jobicy connector parses jobs when jobType, jobGeo, or jobLevel are lists."""
+    connector = JobicyConnector()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "jobs": [
+            {
+                "id": "jobicy-999",
+                "jobTitle": "Junior AI Engineer",
+                "companyName": "DeepTech Labs",
+                "jobType": ["Full-Time"],
+                "jobGeo": ["Remote", "Worldwide"],
+                "jobLevel": ["Entry-Level"],
+                "jobIndustry": ["Artificial Intelligence", "Python"],
+                "url": "https://jobicy.com/jobs/junior-ai-engineer",
+                "pubDate": "2026-10-24T10:00:00Z",
+                "annualSalaryMin": "60000",
+                "annualSalaryMax": "90000",
+                "salaryCurrency": "USD",
+                "jobDescription": "<p>Exciting junior AI position developing autonomous agents.</p>",
+            }
+        ]
+    }
+
+    with patch("httpx.AsyncClient.get", AsyncMock(return_value=mock_resp)):
+        jobs = await connector.fetch_jobs(limit=10)
+        assert len(jobs) == 1
+        job = jobs[0]
+        assert job.title == "Junior AI Engineer"
+        assert job.company == "DeepTech Labs"
+        assert job.employment_type == "Full-Time"
+        assert job.location == "Remote, Worldwide"
+        assert job.experience_level == "Entry-Level"
+        assert "Artificial Intelligence" in job.requirements
+        assert job.source == "jobicy"
+
+
+def test_job_listing_schema_normalizes_list_fields():
+    """Verify JobListingCreate normalizes list inputs for employment_type, location, and experience_level."""
+    job = JobListingCreate(
+        title="Python Backend Developer",
+        company="FastAPI Corp",
+        location=["Remote", "India"],
+        employment_type=["Full-Time", "Contract"],
+        experience_level=["Junior", "Entry-level"],
+        description="FastAPI, async SQLite, and agent development.",
+        application_url="https://example.com/apply/123",
+        source="test_source",
+    )
+    assert job.location == "Remote, India"
+    assert job.employment_type == "Full-Time, Contract"
+    assert job.experience_level == "Junior, Entry-level"
+
