@@ -413,7 +413,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
               <button onclick="generateDraft(${job.id})" class="text-xs bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-700 px-3 py-1.5 rounded font-medium transition flex items-center gap-1">
                 <i class="fa-solid fa-feather"></i> Letter
               </button>
-              <button onclick="prepareApply(${job.id})" class="text-xs bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-700 px-3 py-1.5 rounded font-medium transition flex items-center gap-1">
+              <button onclick="prepareApply(${job.id}, this)" class="text-xs bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-700 px-3 py-1.5 rounded font-medium transition flex items-center gap-1">
                 <i class="fa-solid fa-paper-plane"></i> Apply
               </button>
             </div>
@@ -514,29 +514,75 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       alert(`Cover Letter Generated!\n\nSubject: ${data.subject}\n\nPreview:\n${data.content.substring(0, 300)}...`);
     }
 
-    async function prepareApply(id) {
+    async function prepareApply(id, btn) {
       if (!confirm("This will launch Playwright to fill form fields in DRY-RUN mode. No submission occurs without your confirmation. Proceed?")) return;
-      const res = await fetch(`/api/v1/applications/prepare`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job_id: id })
-      });
-      const data = await res.json();
-      alert(`Dry-run status: ${data.status}\nLast Step: ${data.last_step}\n\n${data.message}`);
-      loadApplications();
-      switchTab('applications-tab');
+
+      const targetBtn = btn || (window.event ? window.event.currentTarget : null);
+      let oldHtml = '';
+      if (targetBtn && targetBtn.innerHTML) {
+        oldHtml = targetBtn.innerHTML;
+        targetBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Running Auto-Fill...';
+        targetBtn.disabled = true;
+      }
+
+      try {
+        const res = await fetch(`/api/v1/applications/prepare`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: id })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const detail = data.detail || data.message || "An error occurred during form auto-fill.";
+          alert(`Auto-Apply Notice:\n\n${detail}`);
+        } else {
+          alert(`Dry-Run Completed!\n\nStatus: ${data.status}\nLast Step: ${data.last_step}\n\n${data.message}`);
+        }
+        loadApplications();
+        switchTab('applications-tab');
+      } catch (err) {
+        alert(`Error executing dry-run: ${err.message}`);
+      } finally {
+        if (targetBtn && targetBtn.innerHTML) {
+          targetBtn.innerHTML = oldHtml;
+          targetBtn.disabled = false;
+        }
+      }
     }
 
-    async function confirmSubmit(appId, jobId) {
+    async function confirmSubmit(appId, jobId, btn) {
       if (!confirm("CONFIRM APPLICATION SUBMISSION: Are you completely certain you want to submit this job application? This action cannot be undone.")) return;
-      const res = await fetch(`/api/v1/applications/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job_id: jobId, user_confirmed_submission: true, dry_run: false })
-      });
-      const data = await res.json();
-      alert(`Submission result: ${data.status}\nMessage: ${data.message}`);
-      loadApplications();
+
+      const targetBtn = btn || (window.event ? window.event.currentTarget : null);
+      let oldHtml = '';
+      if (targetBtn && targetBtn.innerHTML) {
+        oldHtml = targetBtn.innerHTML;
+        targetBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Submitting...';
+        targetBtn.disabled = true;
+      }
+
+      try {
+        const res = await fetch(`/api/v1/applications/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: jobId, user_confirmed_submission: true, dry_run: false })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const detail = data.detail || data.message || "An error occurred during submission.";
+          alert(`Submission Notice:\n\n${detail}`);
+        } else {
+          alert(`Submission Result:\n\nStatus: ${data.status}\n\n${data.message}`);
+        }
+        loadApplications();
+      } catch (err) {
+        alert(`Submission failed: ${err.message}`);
+      } finally {
+        if (targetBtn && targetBtn.innerHTML) {
+          targetBtn.innerHTML = oldHtml;
+          targetBtn.disabled = false;
+        }
+      }
     }
 
     async function triggerJobSync() {
@@ -680,12 +726,12 @@ Ingestion Summary across Enabled Sources:
               </a>
             ` : ''}
             ${app.status === 'DISCOVERED' ? `
-              <button onclick="prepareApply(${app.job_id})" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3.5 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
+              <button onclick="prepareApply(${app.job_id}, this)" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3.5 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
                 <i class="fa-solid fa-play"></i> Auto-Fill (Dry-Run)
               </button>
             ` : ''}
             ${app.status === 'READY_FOR_APPROVAL' ? `
-              <button onclick="confirmSubmit(${app.id}, ${app.job_id})" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
+              <button onclick="confirmSubmit(${app.id}, ${app.job_id}, this)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded text-xs transition flex items-center gap-1.5 whitespace-nowrap">
                 <i class="fa-solid fa-check-double"></i> Approve & Submit
               </button>
             ` : ''}

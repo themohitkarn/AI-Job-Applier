@@ -6,8 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.automation.browser import BrowserAutomationService
 from app.automation.schemas import BrowserActionRequest, BrowserActionResponse
+from app.core.logging import get_logger
 from app.db.models import Application, JobListing
 from app.db.session import get_db
+
+logger = get_logger("applications")
 
 router = APIRouter(prefix="/applications", tags=["Application Automation & Approvals"])
 
@@ -28,7 +31,11 @@ async def prepare_application(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Browser automation error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        err_msg = str(e).strip() or repr(e)
+        logger.error(f"Browser automation prepare endpoint failure: {err_msg}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Browser automation error: {err_msg}")
 
 
 @router.post("/submit", response_model=BrowserActionResponse, summary="Submit application with explicit user approval")
