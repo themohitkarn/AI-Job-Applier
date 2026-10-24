@@ -131,3 +131,19 @@ async def test_groq_401_authentication_error_health():
     assert "401 Unauthorized" in health["error"]
     assert "actionable_message" in health
     assert "https://console.groq.com/keys" in health["actionable_message"]
+
+
+def test_groq_model_normalization_gpt_oss_120b():
+    """Verify gpt-oss-120b variations normalize to openai/gpt-oss-120b."""
+    p1 = GroqProvider(api_key="gsk_key", model="gpt-oss-120b")
+    assert p1.model_name == "openai/gpt-oss-120b"
+
+    p2 = GroqProvider(api_key="gsk_key", model="gpt oss120b")
+    assert p2.model_name == "openai/gpt-oss-120b"
+
+    p3 = GroqProvider(api_key="gsk_key", model="openai/gpt-oss-120b")
+    assert p3.model_name == "openai/gpt-oss-120b"
+
+    # Default fallback should be openai/gpt-oss-120b
+    p_default = GroqProvider(api_key="gsk_key")
+    assert p_default.model_name == "openai/gpt-oss-120b"

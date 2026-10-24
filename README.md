@@ -100,7 +100,7 @@ Ensure your credentials and employer target boards are configured:
 ```ini
 AI_PROVIDER="groq"
 GROQ_API_KEY="gsk_your_actual_groq_api_key_here"
-GROQ_MODEL="llama-3.3-70b-versatile"
+GROQ_MODEL="openai/gpt-oss-120b"
 
 # Enabled connectors
 ENABLED_CONNECTORS="remoteok,jobicy,arbeitnow,greenhouse"
@@ -191,7 +191,7 @@ In `.env`:
 ```ini
 AI_PROVIDER="groq"
 GROQ_API_KEY="gsk_..."
-GROQ_MODEL="llama-3.3-70b-versatile"
+GROQ_MODEL="openai/gpt-oss-120b"
 ```
 
 ### Ollama Configuration (Optional Local Model)

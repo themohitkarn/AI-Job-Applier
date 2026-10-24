@@ -13,7 +13,7 @@ def test_valid_settings_loading():
     )
     assert settings.app_name == "AI Auto Job Apply"
     assert settings.ai_provider == "groq"
-    assert settings.groq_model == "llama-3.3-70b-versatile"
+    assert settings.groq_model == "openai/gpt-oss-120b"
     assert "remoteok" in settings.enabled_connectors_list
     assert len(settings.cors_origins_list) > 0
 

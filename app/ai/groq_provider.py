@@ -26,14 +26,23 @@ class GroqProvider(AIProvider):
     def __init__(
         self,
         api_key: Optional[str],
-        model: str = "llama-3.3-70b-versatile",
+        model: str = "openai/gpt-oss-120b",
         temperature: float = 0.7,
         max_tokens: int = 2048,
         timeout: float = 45.0,
         max_retries: int = 3,
     ):
         self._api_key = api_key
-        self._model = model
+        # Normalize model identifier for aliases (e.g. gpt-oss-120b, gpt oss120b, openai/gpt-oss-120b)
+        raw_model = (model or "openai/gpt-oss-120b").strip()
+        clean = raw_model.lower().replace(" ", "-").replace("_", "-").replace(":", "-")
+        if clean in ("gpt-oss-120b", "openai/gpt-oss-120b", "gpt-oss120b", "gptoss120b", "openai-gpt-oss-120b", "gptoss-120b"):
+            self._model = "openai/gpt-oss-120b"
+        elif clean in ("gpt-oss-20b", "openai/gpt-oss-20b", "gpt-oss20b", "gptoss20b", "openai-gpt-oss-20b", "gptoss-20b"):
+            self._model = "openai/gpt-oss-20b"
+        else:
+            self._model = raw_model
+
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._timeout = timeout

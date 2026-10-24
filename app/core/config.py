@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     # Groq Settings (Default)
     groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
-    groq_model: str = Field(default="llama-3.3-70b-versatile", alias="GROQ_MODEL")
+    groq_model: str = Field(default="openai/gpt-oss-120b", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE", ge=0.0, le=2.0)
     groq_max_tokens: int = Field(default=2048, alias="GROQ_MAX_TOKENS", gt=0)
     groq_timeout: float = Field(default=45.0, alias="GROQ_TIMEOUT", gt=0)
