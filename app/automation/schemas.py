@@ -19,6 +19,7 @@ class ApplicationStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     FAILED = "FAILED"
     VERIFICATION_REQUIRED = "VERIFICATION_REQUIRED"
+    MANUAL_ACTION_REQUIRED = "MANUAL_ACTION_REQUIRED"
 
 
 class BrowserActionRequest(BaseModel):

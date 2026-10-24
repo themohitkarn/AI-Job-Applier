@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import sanitize_filename, validate_file_path, validate_file_upload
+from app.core.text_cleaner import safe_parse_list
 from app.db.models import ResumeDocument, UserProfile
 from app.profile.resume_parser import extract_text_from_file
 from app.profile.schemas import UserProfileResponse, UserProfileUpdate, ExperienceItem, EducationItem
@@ -82,7 +83,7 @@ class ProfileService:
             headline=profile.headline,
             summary=profile.summary,
             target_roles=json.loads(profile.target_roles or "[]"),
-            skills=json.loads(profile.skills or "[]"),
+            skills=safe_parse_list(profile.skills),
             experience_years=float(profile.experience_years or 0.0),
             experiences=[ExperienceItem(**e) for e in json.loads(profile.experiences or "[]")],
             educations=[EducationItem(**e) for e in json.loads(profile.educations or "[]")],

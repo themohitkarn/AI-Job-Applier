@@ -32,6 +32,8 @@ class MatchAssessment(BaseModel):
     synonym_matches: Dict[str, str] = Field(default_factory=dict, description="Transferable skill mappings")
     is_fresher_friendly: bool = Field(default=False)
     work_modes: List[str] = Field(default_factory=list)
+    is_fallback: bool = Field(default=False, description="True if AI failed/unavailable and deterministic rule was used")
+    low_information_warning: Optional[str] = Field(default=None, description="Warning if job description was incomplete")
 
 
 class JobMatchResponse(BaseModel):
@@ -51,3 +53,5 @@ class JobMatchResponse(BaseModel):
     synonym_matches: Dict[str, str] = Field(default_factory=dict)
     is_fresher_friendly: bool = Field(default=False)
     work_modes: List[str] = Field(default_factory=list)
+    is_fallback: bool = Field(default=False)
+    low_information_warning: Optional[str] = Field(default=None)

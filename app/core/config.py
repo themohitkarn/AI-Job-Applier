@@ -6,11 +6,13 @@ and startup validation.
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.keywords import DEFAULT_KEYWORD_GROUPS
+
+ENV_FILE_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -47,6 +49,16 @@ class Settings(BaseSettings):
     groq_max_tokens: int = Field(default=2048, alias="GROQ_MAX_TOKENS", gt=0)
     groq_timeout: float = Field(default=45.0, alias="GROQ_TIMEOUT", gt=0)
     groq_max_retries: int = Field(default=3, alias="GROQ_MAX_RETRIES", ge=0)
+
+    @field_validator("groq_api_key", mode="before")
+    @classmethod
+    def clean_groq_api_key(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+            s = s[1:-1].strip()
+        return s
 
     # Ollama Settings (Optional Local)
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
@@ -138,7 +150,7 @@ class Settings(BaseSettings):
     sender_password: Optional[str] = Field(default="", alias="SENDER_PASSWORD")
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         extra="ignore"
     )
@@ -211,19 +223,31 @@ class Settings(BaseSettings):
         return self
 
 
-# Global singleton instance provider
+# Global singleton instance provider with auto-reload on .env change
 _settings: Optional[Settings] = None
+_settings_env_mtime: float = 0.0
 
 
 def get_settings() -> Settings:
-    """Retrieve cached application settings instance."""
-    global _settings
-    if _settings is None:
+    """Retrieve cached application settings instance.
+
+    Automatically invalidates the cache if the .env file has been modified
+    since the settings were last loaded, enabling live key rotation without
+    restarting the process.
+    """
+    global _settings, _settings_env_mtime
+    try:
+        current_mtime = ENV_FILE_PATH.stat().st_mtime if ENV_FILE_PATH.exists() else 0.0
+    except OSError:
+        current_mtime = 0.0
+    if _settings is None or current_mtime > _settings_env_mtime:
         _settings = Settings()
+        _settings_env_mtime = current_mtime
     return _settings
 
 
 def reset_settings() -> None:
     """Reset cached settings instance (primarily for testing)."""
-    global _settings
+    global _settings, _settings_env_mtime
     _settings = None
+    _settings_env_mtime = 0.0

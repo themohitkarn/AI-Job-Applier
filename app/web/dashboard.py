@@ -208,6 +208,59 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Resumes dynamically loaded -->
           </div>
         </div>
+
+        <!-- AI Profile Intelligence Card -->
+        <div class="card p-6 space-y-4 md:col-span-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-xl font-bold flex items-center gap-2">
+                <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i> AI Profile Intelligence & Completeness Audit
+              </h2>
+              <p class="text-xs text-slate-400 mt-1">Audit your profile completeness, standardize skill naming, and discover complementary technologies.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="revert-profile-btn" onclick="revertProfile()" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs px-3 py-1.5 rounded transition">
+                <i class="fa-solid fa-rotate-left mr-1"></i> Undo Last Changes
+              </button>
+              <button onclick="runProfileAudit()" class="bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs px-3 py-1.5 rounded transition flex items-center gap-1.5">
+                <i class="fa-solid fa-microchip"></i> Run AI Audit
+              </button>
+            </div>
+          </div>
+
+          <div id="audit-results-container" class="space-y-4 hidden border-t border-slate-800 pt-4">
+            <!-- Completeness Bar -->
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-400">Profile Completeness Score</span>
+                <span id="audit-score-text" class="text-white font-semibold">0%</span>
+              </div>
+              <div class="w-full bg-slate-800 rounded-full h-2.5">
+                <div id="audit-score-bar" class="bg-indigo-500 h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+              </div>
+              <p id="audit-status-badge" class="text-xs text-indigo-400 mt-1"></p>
+            </div>
+
+            <!-- Missing Sections & Recommendations -->
+            <div id="audit-missing-box" class="p-3 bg-slate-900 border border-slate-800 rounded text-xs space-y-1"></div>
+
+            <!-- Skill Normalization Suggestions -->
+            <div id="audit-normalization-box" class="space-y-2">
+              <h3 class="text-sm font-semibold text-slate-300 flex items-center gap-1.5">
+                <i class="fa-solid fa-spell-check text-indigo-400"></i> Canonical Skill Corrections (Typos & Aliases)
+              </h3>
+              <div id="audit-norm-list" class="space-y-1.5"></div>
+            </div>
+
+            <!-- Recommended Complementary Skills -->
+            <div id="audit-recommended-box" class="space-y-2">
+              <h3 class="text-sm font-semibold text-slate-300 flex items-center gap-1.5">
+                <i class="fa-solid fa-lightbulb text-amber-400"></i> Recommended Skills to Boost Matching
+              </h3>
+              <div id="audit-rec-pills" class="flex flex-wrap gap-1.5"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -540,18 +593,43 @@ Ingestion Summary across Enabled Sources:
         } else if (m.status === 'NEEDS_REVIEW') {
           color = 'text-amber-400 border-amber-700 bg-amber-950/40';
         }
+        let badgesHtml = `<div class="badge ${color} border mt-1">${escapeHtml(m.status)}</div>`;
+        if (m.is_fallback) {
+          badgesHtml += `<span class="badge bg-amber-950/80 text-amber-300 border border-amber-700 text-[10px] ml-1"><i class="fa-solid fa-calculator"></i> Rule Fallback</span>`;
+        } else {
+          badgesHtml += `<span class="badge bg-indigo-950/80 text-indigo-300 border border-indigo-700 text-[10px] ml-1"><i class="fa-solid fa-brain"></i> AI Evaluated</span>`;
+        }
+
+        let lowInfoHtml = '';
+        if (m.low_information_warning) {
+          lowInfoHtml = `<div class="p-2 bg-amber-950/30 border border-amber-800/50 rounded text-xs text-amber-300 flex items-center gap-1.5"><i class="fa-solid fa-circle-info text-amber-400"></i> ${escapeHtml(m.low_information_warning)}</div>`;
+        }
+
+        let positiveMatchesHtml = '';
+        if (m.positive_matches && m.positive_matches.length > 0) {
+          positiveMatchesHtml = `<div class="text-xs text-slate-400 flex flex-wrap gap-1 items-center"><span class="text-emerald-400 font-semibold">Matched:</span> ${m.positive_matches.map(s => `<span class="badge bg-emerald-950/60 text-emerald-300 border border-emerald-800 text-[10px]">${escapeHtml(s)}</span>`).join('')}</div>`;
+        }
+
+        let missingCriteriaHtml = '';
+        if (m.missing_criteria && m.missing_criteria.length > 0) {
+          missingCriteriaHtml = `<div class="text-xs text-slate-400 flex flex-wrap gap-1 items-center mt-1"><span class="text-rose-400 font-semibold">Missing:</span> ${m.missing_criteria.map(s => `<span class="badge bg-rose-950/60 text-rose-300 border border-rose-800 text-[10px]">${escapeHtml(s)}</span>`).join('')}</div>`;
+        }
+
         item.innerHTML = `
           <div class="flex items-center justify-between">
             <div>
               <h3 class="font-bold text-white text-lg">${escapeHtml(m.job_title)}</h3>
-              <p class="text-sm text-slate-400">${escapeHtml(m.company)}</p>
+              <p class="text-sm text-slate-400">${escapeHtml(m.company)} • ${escapeHtml(m.location || 'Remote')}</p>
             </div>
             <div class="text-right">
               <span class="text-2xl font-black ${m.overall_score >= 70 ? 'text-emerald-400' : (m.overall_score >= 35 ? 'text-sky-400' : 'text-amber-400')}">${m.overall_score}%</span>
-              <div class="badge ${color} border mt-1">${escapeHtml(m.status)}</div>
+              <div>${badgesHtml}</div>
             </div>
           </div>
-          <p class="text-sm text-slate-300">${escapeHtml(m.rationale)}</p>
+          ${lowInfoHtml}
+          <p class="text-sm text-slate-300 leading-relaxed">${escapeHtml(m.rationale)}</p>
+          ${positiveMatchesHtml}
+          ${missingCriteriaHtml}
           <div class="grid grid-cols-3 gap-2 text-xs pt-2 border-t border-slate-800">
             <div>Skills: <span class="font-bold text-indigo-400">${m.skills_score}%</span></div>
             <div>Experience: <span class="font-bold text-indigo-400">${m.experience_score}%</span></div>
@@ -628,12 +706,25 @@ Ingestion Summary across Enabled Sources:
       const email = document.getElementById('prof-email').value;
       const experience_years = parseFloat(document.getElementById('prof-exp').value);
       const skills = document.getElementById('prof-skills').value.split(',').map(s => s.trim()).filter(s => s);
-      await fetch('/api/v1/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full_name, email, experience_years, skills })
-      });
-      alert('Profile saved successfully!');
+      try {
+        const res = await fetch('/api/v1/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full_name, email, experience_years, skills })
+        });
+        if (!res.ok) {
+          let errMsg = `Server returned ${res.status}`;
+          try {
+            const errData = await res.json();
+            errMsg = errData.detail || JSON.stringify(errData);
+          } catch(_) {}
+          alert(`Profile save failed: ${errMsg}`);
+          return;
+        }
+        alert('Profile saved successfully!');
+      } catch (err) {
+        alert(`Profile save error: ${err.message}`);
+      }
     }
 
     async function uploadResume() {
@@ -660,6 +751,144 @@ Ingestion Summary across Enabled Sources:
       if (!confirm('Delete this resume?')) return;
       await fetch(`/api/v1/resumes/${id}`, { method: 'DELETE' });
       loadProfile();
+    }
+
+    async function runProfileAudit() {
+      const btn = event ? event.target.closest('button') : null;
+      if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Auditing...';
+      try {
+        const res = await fetch('/api/v1/profile/audit?use_ai=true');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const container = document.getElementById('audit-results-container');
+        container.classList.remove('hidden');
+
+        // Score
+        document.getElementById('audit-score-text').textContent = `${data.completeness_score}%`;
+        document.getElementById('audit-score-bar').style.width = `${data.completeness_score}%`;
+        document.getElementById('audit-status-badge').textContent = data.completeness_status;
+
+        // Undo button
+        const undoBtn = document.getElementById('revert-profile-btn');
+        if (data.can_undo) {
+          undoBtn.classList.remove('hidden');
+        } else {
+          undoBtn.classList.add('hidden');
+        }
+
+        // Missing & recommendations
+        const missBox = document.getElementById('audit-missing-box');
+        let missHtml = '';
+        if (data.missing_sections && data.missing_sections.length > 0) {
+          missHtml += `<p class="text-rose-400 font-semibold mb-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Missing Sections: ${data.missing_sections.join(', ')}</p>`;
+        } else {
+          missHtml += '<p class="text-emerald-400 font-semibold mb-1"><i class="fa-solid fa-circle-check mr-1"></i> All core profile sections present!</p>';
+        }
+        if (data.recommendations && data.recommendations.length > 0) {
+          missHtml += '<ul class="list-disc list-inside text-slate-400 space-y-0.5 mt-1">';
+          data.recommendations.forEach(r => missHtml += `<li>${escapeHtml(r)}</li>`);
+          missHtml += '</ul>';
+        }
+        missBox.innerHTML = missHtml;
+
+        // Normalization
+        const normList = document.getElementById('audit-norm-list');
+        const normBox = document.getElementById('audit-normalization-box');
+        if (data.skill_suggestions && data.skill_suggestions.length > 0) {
+          normBox.classList.remove('hidden');
+          normList.innerHTML = '';
+          data.skill_suggestions.forEach(sg => {
+            const row = document.createElement('div');
+            row.className = 'p-2.5 bg-slate-900 border border-slate-800 rounded flex items-center justify-between text-xs';
+            row.innerHTML = `
+              <div>
+                <span class="line-through text-rose-400 font-mono">${escapeHtml(sg.original_skill)}</span>
+                <i class="fa-solid fa-arrow-right mx-1.5 text-slate-500"></i>
+                <span class="text-emerald-400 font-semibold font-mono">${escapeHtml(sg.suggested_skill)}</span>
+                <span class="badge bg-slate-800 text-slate-400 border border-slate-700 ml-2">${escapeHtml(sg.category)}</span>
+                <p class="text-slate-400 mt-0.5">${escapeHtml(sg.reason)}</p>
+              </div>
+              <button onclick="acceptSkillCorrection('${escapeHtml(sg.original_skill)}', '${escapeHtml(sg.suggested_skill)}')" class="bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-600/50 text-xs px-2.5 py-1 rounded transition">
+                <i class="fa-solid fa-check mr-1"></i> Accept
+              </button>
+            `;
+            normList.appendChild(row);
+          });
+        } else {
+          normBox.classList.add('hidden');
+        }
+
+        // Recommended skills
+        const recBox = document.getElementById('audit-recommended-box');
+        const recPills = document.getElementById('audit-rec-pills');
+        if (data.recommended_skills && data.recommended_skills.length > 0) {
+          recBox.classList.remove('hidden');
+          recPills.innerHTML = '';
+          data.recommended_skills.forEach(skill => {
+            const btn = document.createElement('button');
+            btn.className = 'badge bg-indigo-950/80 hover:bg-indigo-800 text-indigo-300 border border-indigo-700 px-2 py-1 rounded text-xs transition flex items-center gap-1';
+            btn.innerHTML = `<i class="fa-solid fa-plus text-indigo-400"></i> ${escapeHtml(skill)}`;
+            btn.onclick = () => addRecommendedSkill(skill);
+            recPills.appendChild(btn);
+          });
+        } else {
+          recBox.classList.add('hidden');
+        }
+
+      } catch (err) {
+        alert('Audit failed: ' + err.message);
+      } finally {
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-microchip"></i> Run AI Audit';
+      }
+    }
+
+    async function acceptSkillCorrection(orig, sugg) {
+      try {
+        const payload = { approved_skill_replacements: {} };
+        payload.approved_skill_replacements[orig] = sugg;
+        const res = await fetch('/api/v1/profile/apply-suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadProfile();
+        runProfileAudit();
+      } catch (e) {
+        alert('Failed to accept skill correction: ' + e.message);
+      }
+    }
+
+    async function addRecommendedSkill(skill) {
+      try {
+        const res = await fetch('/api/v1/profile/apply-suggestions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ added_skills: [skill] })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadProfile();
+        runProfileAudit();
+      } catch (e) {
+        alert('Failed to add skill: ' + e.message);
+      }
+    }
+
+    async function revertProfile() {
+      if (!confirm('Revert profile to previous snapshot?')) return;
+      try {
+        const res = await fetch('/api/v1/profile/revert', { method: 'POST' });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Revert failed');
+        }
+        alert('Profile reverted successfully!');
+        await loadProfile();
+        runProfileAudit();
+      } catch (e) {
+        alert('Undo error: ' + e.message);
+      }
     }
 
     function switchTab(tabId) {

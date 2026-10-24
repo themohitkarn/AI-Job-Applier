@@ -57,6 +57,35 @@ async def test_profile_endpoints(test_db_session):
             updated_data = resp_update.json()
             assert updated_data["headline"] == "Lead Python Architect"
             assert "Kubernetes" in updated_data["skills"]
+
+            # Test Profile Audit endpoint
+            resp_audit = await client.get("/api/v1/profile/audit?use_ai=false")
+            assert resp_audit.status_code == 200
+            audit_data = resp_audit.json()
+            assert "completeness_score" in audit_data
+            assert "completeness_status" in audit_data
+            assert isinstance(audit_data["recommended_skills"], list)
+
+            # Test Apply Suggestions endpoint
+            apply_payload = {
+                "added_skills": ["Docker", "SQLAlchemy"],
+                "added_target_roles": ["AI Automation Engineer"],
+            }
+            resp_apply = await client.post("/api/v1/profile/apply-suggestions", json=apply_payload)
+            assert resp_apply.status_code == 200
+            applied_data = resp_apply.json()
+            assert "Docker" in applied_data["skills"]
+            assert "AI Automation Engineer" in applied_data["target_roles"]
+
+            # Test Revert endpoint
+            resp_revert = await client.post("/api/v1/profile/revert")
+            assert resp_revert.status_code == 200
+            revert_data = resp_revert.json()
+            assert revert_data["success"] is True
+
+            # Second revert should return 400 since snapshot history was consumed
+            resp_revert_2 = await client.post("/api/v1/profile/revert")
+            assert resp_revert_2.status_code == 400
     finally:
         app.dependency_overrides.clear()
 

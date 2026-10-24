@@ -65,3 +65,46 @@ class ResumeResponse(BaseModel):
     extracted_text_preview: str
     is_primary: bool
     created_at: datetime
+
+
+
+class SkillEnhancementSuggestion(BaseModel):
+    """Proposal for normalizing or correcting a skill."""
+    original_skill: str
+    suggested_skill: str
+    category: str = "General"
+    reason: str
+    confidence: float = 1.0
+    is_correction: bool = True
+
+
+class ProfileAuditReport(BaseModel):
+    """Holistic profile intelligence audit and recommendation report."""
+    completeness_score: float = Field(..., ge=0.0, le=100.0)
+    completeness_status: str
+    missing_sections: List[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+    skill_suggestions: List[SkillEnhancementSuggestion] = Field(default_factory=list)
+    recommended_skills: List[str] = Field(default_factory=list)
+    suggested_target_roles: List[str] = Field(default_factory=list)
+    can_undo: bool = False
+    last_snapshot_at: Optional[datetime] = None
+
+
+class ApplySuggestionsRequest(BaseModel):
+    """User-approved modifications to apply to the profile."""
+    approved_skill_replacements: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of original skill to accepted canonical replacement (e.g. {'pyhton': 'Python'})"
+    )
+    added_skills: List[str] = Field(default_factory=list)
+    added_target_roles: List[str] = Field(default_factory=list)
+    headline: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class RevertProfileResponse(BaseModel):
+    """Response returned upon undoing profile modifications."""
+    success: bool
+    message: str
+    restored_at: datetime

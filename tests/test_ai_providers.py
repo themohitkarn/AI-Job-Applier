@@ -147,3 +147,36 @@ def test_groq_model_normalization_gpt_oss_120b():
     # Default fallback should be openai/gpt-oss-120b
     p_default = GroqProvider(api_key="gsk_key")
     assert p_default.model_name == "openai/gpt-oss-120b"
+
+
+
+@pytest.mark.asyncio
+async def test_groq_structured_generation_with_preamble_and_thinking_tokens():
+    """Bug 4 Regression Test: verify reasoning model outputs with commentary and preamble parse correctly."""
+    provider = GroqProvider(api_key="gsk_test_mock_key", model="openai/gpt-oss-120b")
+
+    mock_client = MagicMock()
+    mock_choice = MagicMock()
+    # Simulate openai/gpt-oss-120b outputting conversational preamble, thinking commentary, and trailing notes
+    mock_choice.message.content = (
+        "Here is the structured assessment matching the required schema:\n\n"
+        "```json\n"
+        "{\n"
+        '  "summary": "Reasoning model parsed successfully",\n'
+        '  "confidence_score": 98.4\n'
+        "}\n"
+        "```\n\n"
+        "Let me know if you would like me to adjust any evaluation weights."
+    )
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    provider._client = mock_client
+
+    result = await provider.generate_structured(
+        prompt="Evaluate candidate",
+        schema=SampleStructuredOutput,
+    )
+    assert result.summary == "Reasoning model parsed successfully"
+    assert result.confidence_score == 98.4

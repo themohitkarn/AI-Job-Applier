@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.jobs.connector_base import BaseJobConnector, SourceCapability
 from app.jobs.schemas import JobListingCreate
+from app.core.text_cleaner import clean_html_description
 
 logger = get_logger("connector_ashby")
 
@@ -118,18 +119,38 @@ class AshbyConnector(BaseJobConnector):
 
                         app_url = j.get("jobUrl") or f"https://jobs.ashbyhq.com/{org}/{j.get('id')}"
 
+                        # Attempt to get full description from the posting detail
+                        description = ""
+                        posting_id = j.get("id")
+                        if posting_id:
+                            try:
+                                detail_resp = await client.get(
+                                    f"{self.BASE_URL}/{org}/posting/{posting_id}"
+                                )
+                                if detail_resp.status_code == 200:
+                                    detail_data = detail_resp.json()
+                                    raw_desc = detail_data.get("descriptionHtml") or detail_data.get("description") or ""
+                                    if raw_desc:
+                                        description = clean_html_description(raw_desc)
+                            except Exception as detail_err:
+                                logger.debug(f"Could not fetch Ashby posting detail for {posting_id}: {detail_err}")
+
+                        # Fallback description if detail fetch didn't work
+                        if not description or len(description.strip()) < 30:
+                            description = f"Role: {title} in {department} at {company_name}. [Low-information: full description not available from Ashby API]"
+
                         job = JobListingCreate(
                             title=title.strip(),
                             company=company_name,
                             location=loc_name,
                             employment_type="Full-time",
                             experience_level="Mid-level",
-                            description=f"Role: {title} in {department} at {company_name}",
+                            description=description,
                             requirements=[department] if department else [],
                             application_url=app_url,
                             posted_date=datetime.now(timezone.utc),
                             source=self.name,
-                            external_id=str(j.get("id", "")),
+                            external_id=str(posting_id or ""),
                         )
                         results.append(job)
                         if len(results) >= limit:

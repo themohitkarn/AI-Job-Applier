@@ -53,6 +53,33 @@ async def submit_application(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Submission error: {str(e)}")
 
 
+@router.post("/{app_id}/approve-and-submit", response_model=BrowserActionResponse, summary="Approve and submit a previously pre-filled application")
+async def approve_and_submit_application(
+    app_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Explicit human approval endpoint to submit an application previously held in READY_FOR_APPROVAL."""
+    stmt = select(Application).where(Application.id == app_id)
+    app_record = (await db.execute(stmt)).scalar_one_or_none()
+    if not app_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Application ID {app_id} not found")
+
+    req = BrowserActionRequest(
+        job_id=app_record.job_id,
+        resume_id=app_record.resume_id,
+        draft_id=app_record.draft_id,
+        user_confirmed_submission=True,
+        dry_run=False,
+    )
+    service = BrowserAutomationService(db)
+    try:
+        return await service.execute_application_flow(req)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Approval submission error: {str(e)}")
+
+
 @router.get("", summary="List application records and tracking statuses")
 async def list_applications(db: AsyncSession = Depends(get_db)) -> List[Dict[str, Any]]:
     query = select(Application, JobListing).join(JobListing, Application.job_id == JobListing.id).order_by(Application.created_at.desc())

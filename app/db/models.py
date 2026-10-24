@@ -51,6 +51,20 @@ class UserProfile(Base):
 
     resumes = relationship("ResumeDocument", back_populates="user", cascade="all, delete-orphan")
     applications = relationship("Application", back_populates="user", cascade="all, delete-orphan")
+    snapshots = relationship("ProfileSnapshot", back_populates="user", cascade="all, delete-orphan")
+
+
+class ProfileSnapshot(Base):
+    """Snapshot of profile state for audit history and non-destructive undo/revert."""
+    __tablename__ = "profile_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("user_profiles.id"), nullable=False, index=True)
+    action_type = Column(String(100), nullable=False)  # "profile_update", "apply_suggestions", "skill_normalization"
+    snapshot_data = Column(Text, nullable=False)       # JSON string of UserProfile fields
+    created_at = Column(DateTime, default=utc_now)
+
+    user = relationship("UserProfile", back_populates="snapshots")
 
 
 class ResumeDocument(Base):
@@ -119,6 +133,9 @@ class JobMatch(Base):
     rationale = Column(Text, nullable=False, default="")
     missing_criteria = Column(Text, nullable=False, default="[]")
     positive_matches = Column(Text, nullable=False, default="[]")
+    match_fingerprint = Column(String(64), nullable=True, index=True)
+    is_fallback = Column(Boolean, default=False)
+    low_information_warning = Column(Text, nullable=True)
     evaluated_at = Column(DateTime, default=utc_now)
 
     job = relationship("JobListing", back_populates="matches")

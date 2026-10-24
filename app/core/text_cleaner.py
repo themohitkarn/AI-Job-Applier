@@ -57,3 +57,37 @@ def clean_html_description(raw: str) -> str:
             lines.append(cleaned_line)
 
     return "\n".join(lines).strip()
+
+
+
+def safe_parse_list(raw: str | None, default: list | None = None) -> list:
+    """Parse a JSON-encoded list or comma-separated string into a Python list.
+
+    Handles both JSON arrays (e.g. '["Python", "FastAPI"]') and plain
+    comma-separated strings (e.g. 'Python, FastAPI, SQL') gracefully,
+    preventing JSONDecodeError crashes on legacy data.
+
+    Args:
+        raw: The raw string to parse (may be None).
+        default: Value to return when raw is empty/None.
+
+    Returns:
+        A list of strings.
+    """
+    if default is None:
+        default = []
+    if not raw or not raw.strip():
+        return default
+    raw = raw.strip()
+    # Try JSON first
+    try:
+        import json
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+        # If JSON parsed to something else (dict, str), treat as single-item
+        return [str(parsed)]
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Fallback: comma-separated string
+    return [item.strip() for item in raw.split(",") if item.strip()]

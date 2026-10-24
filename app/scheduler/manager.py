@@ -73,10 +73,11 @@ class SchedulerManager:
                 logger.error(f"Error in periodic job sync: {e}")
 
             # Sleep in intervals to check _running flag
-            for _ in range(int(interval_seconds / 5)):
+            sleep_chunk = min(5.0, max(0.5, float(interval_seconds)))
+            for _ in range(max(1, int(interval_seconds / sleep_chunk))):
                 if not self._running:
                     break
-                await asyncio.sleep(5)
+                await asyncio.sleep(sleep_chunk)
 
     async def _periodic_cleanup_loop(self) -> None:
         """Periodic loop to clear expired cache files."""

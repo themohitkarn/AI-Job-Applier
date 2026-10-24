@@ -49,3 +49,23 @@ def test_clean_html_converts_lists_to_bullets():
     assert "• PostgreSQL" in cleaned
     assert "<ul>" not in cleaned
     assert "<li>" not in cleaned
+
+
+
+def test_safe_parse_list_with_json_and_csv():
+    """Bug 8 Regression Test: safe_parse_list parses JSON arrays, CSV strings, and empty values gracefully."""
+    from app.core.text_cleaner import safe_parse_list
+
+    # Valid JSON array
+    assert safe_parse_list('["Python", "FastAPI", "SQL"]') == ["Python", "FastAPI", "SQL"]
+
+    # Plain comma-separated string
+    assert safe_parse_list("Python, FastAPI, SQL, Docker") == ["Python", "FastAPI", "SQL", "Docker"]
+
+    # Empty / None / whitespace
+    assert safe_parse_list(None) == []
+    assert safe_parse_list("") == []
+    assert safe_parse_list("   ") == []
+
+    # Single string element in JSON
+    assert safe_parse_list('"Python"') == ["Python"]

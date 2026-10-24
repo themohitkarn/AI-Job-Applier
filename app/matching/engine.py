@@ -1,4 +1,5 @@
 """Transparent, explainable job matching and eligibility engine with fresher-first prioritization."""
+import hashlib
 import json
 import re
 from typing import Dict, List, Optional, Tuple
@@ -16,6 +17,7 @@ from app.core.keywords import (
 )
 from app.core.logging import get_logger
 from app.core.security import sanitize_prompt_input
+from app.core.text_cleaner import safe_parse_list
 from app.db.models import JobListing, JobMatch, UserProfile
 from app.matching.schemas import EligibilityStatus, MatchAssessment, ScoringWeights
 
@@ -255,8 +257,13 @@ class MatchingEngine:
             work_modes=work_modes,
         )
 
-    async def evaluate_job(self, job_id: int, user_id: Optional[int] = None) -> JobMatch:
-        """Evaluate matching for a job against user profile, persisting the result."""
+    async def evaluate_job(
+        self,
+        job_id: int,
+        user_id: Optional[int] = None,
+        force_refresh: bool = False,
+    ) -> JobMatch:
+        """Evaluate matching for a job against user profile, persisting and caching results."""
         # Fetch Job
         stmt_job = select(JobListing).where(JobListing.id == job_id)
         job = (await self.db.execute(stmt_job)).scalar_one_or_none()
@@ -269,7 +276,34 @@ class MatchingEngine:
         if not profile:
             raise ValueError("No user profile exists to match against. Please create a profile first.")
 
-        candidate_skills = json.loads(profile.skills or "[]")
+        # Check Match Cache via fingerprint
+        components = [
+            job.fingerprint or "",
+            profile.skills or "",
+            str(profile.experience_years or 0.0),
+            profile.educations or "",
+            profile.target_roles or "",
+        ]
+        fingerprint = hashlib.sha256("|".join(components).encode("utf-8")).hexdigest()
+
+        if not force_refresh:
+            stmt_match = select(JobMatch).where(
+                JobMatch.job_id == job.id,
+                JobMatch.user_id == profile.id,
+                JobMatch.match_fingerprint == fingerprint,
+            )
+            cached_match = (await self.db.execute(stmt_match)).scalar_one_or_none()
+            if cached_match:
+                logger.debug(f"Match cache hit for job {job_id} ({fingerprint[:8]})")
+                return cached_match
+
+        # Detect low information in job description
+        raw_desc = (job.description or "").strip()
+        low_info_warning: Optional[str] = None
+        if len(raw_desc) < 80 or "[low-information" in raw_desc.lower():
+            low_info_warning = "Job description contains limited details; match assessment is tentative and based primarily on role title and department."
+
+        candidate_skills = safe_parse_list(profile.skills)
         candidate_exp = float(profile.experience_years or 0.0)
         candidate_edu = [e.get("degree", "") for e in json.loads(profile.educations or "[]")]
         job_reqs = json.loads(job.requirements or "[]")
@@ -285,6 +319,8 @@ class MatchingEngine:
             job_location=job.location,
             job_experience_level=job.experience_level,
         )
+        baseline.is_fallback = True
+        baseline.low_information_warning = low_info_warning
 
         assessment = baseline
 
@@ -296,14 +332,14 @@ class MatchingEngine:
             - Full Name: {profile.full_name}
             - Experience: {candidate_exp} years (Freshers with zero experience are welcomed for entry-level/internships)
             - Skills: {', '.join(candidate_skills)}
-            - Education: {', '.join(candidate_education)}
+            - Education: {', '.join(candidate_edu)}
             - Work Authorization: {profile.work_authorization}
 
             Job Vacancy:
             - Title: {job.title}
             - Company: {job.company}
             - Location: {job.location}
-            - Description: {sanitize_prompt_input(job.description, max_chars=3000)}
+            - Description: {sanitize_prompt_input(job.description, max_chars=3500)}
             - Explicit Requirements: {', '.join(job_reqs)}
 
             Rule Assessment Baseline:
@@ -325,9 +361,15 @@ class MatchingEngine:
                 system_prompt="You are a transparent, unbiased technical recruiter and job eligibility auditor.",
                 temperature=0.1,
             )
+            ai_assessment.is_fallback = False
+            ai_assessment.low_information_warning = low_info_warning
             assessment = ai_assessment
         except (AIProviderError, Exception) as e:
             logger.info(f"AI provider unavailable or failed during matching ({e}). Using deterministic assessment.")
+            baseline.is_fallback = True
+            baseline.low_information_warning = low_info_warning
+            baseline.rationale = f"[Rule-based fallback: AI unavailable - {e}] {baseline.rationale}"
+            assessment = baseline
 
         # Persist or update match record
         stmt_match = select(JobMatch).where(JobMatch.job_id == job.id, JobMatch.user_id == profile.id)
@@ -348,6 +390,9 @@ class MatchingEngine:
         match_record.rationale = assessment.rationale
         match_record.missing_criteria = json.dumps(assessment.missing_criteria)
         match_record.positive_matches = json.dumps(assessment.positive_matches)
+        match_record.match_fingerprint = fingerprint
+        match_record.is_fallback = assessment.is_fallback
+        match_record.low_information_warning = assessment.low_information_warning
 
         await self.db.commit()
         await self.db.refresh(match_record)

@@ -1,5 +1,6 @@
 """Groq AI Provider Implementation."""
 import json
+import re
 import asyncio
 from typing import Any, Dict, List, Optional, Type, TypeVar
 from pydantic import BaseModel, ValidationError
@@ -200,14 +201,35 @@ class GroqProvider(AIProvider):
             try:
                 data = json.loads(clean_text)
                 return schema.model_validate(data)
-            except (json.JSONDecodeError, ValidationError) as err:
-                logger.warning(f"Failed to parse structured output (attempt {attempt + 1}): {err}")
-                if attempt < self._max_retries:
-                    await asyncio.sleep(1)
-                    continue
-                raise AIProviderError(
-                    f"Model output did not conform to schema {schema.__name__}: {err}",
-                    provider="groq",
-                    status_code=422,
-                )
+            except (json.JSONDecodeError, ValidationError):
+                pass
+
+            # Fallback: extract JSON from fenced code block anywhere in the response
+            fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
+            if fence_match:
+                try:
+                    data = json.loads(fence_match.group(1))
+                    return schema.model_validate(data)
+                except (json.JSONDecodeError, ValidationError):
+                    pass
+
+            # Fallback: extract outermost JSON object from raw text
+            brace_match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+            if brace_match:
+                try:
+                    data = json.loads(brace_match.group(1))
+                    return schema.model_validate(data)
+                except (json.JSONDecodeError, ValidationError) as err:
+                    logger.warning(f"Failed to parse structured output (attempt {attempt + 1}): {err}")
+            else:
+                logger.warning(f"Failed to parse structured output (attempt {attempt + 1}): no JSON object found")
+
+            if attempt < self._max_retries:
+                await asyncio.sleep(1)
+                continue
+            raise AIProviderError(
+                f"Model output did not conform to schema {schema.__name__}",
+                provider="groq",
+                status_code=422,
+            )
         raise AIProviderError("Failed to generate structured data", provider="groq", status_code=422)

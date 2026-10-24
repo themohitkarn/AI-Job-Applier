@@ -11,6 +11,7 @@ from app.ai.factory import get_ai_provider
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import sanitize_prompt_input
+from app.core.text_cleaner import safe_parse_list
 from app.db.models import ApplicationDraft, JobListing, UserProfile
 from app.generation.cache import ContentCacheManager, compute_generation_fingerprint
 from app.generation.schemas import ApproveDraftRequest, DraftType, GenerateContentRequest, GeneratedContentResponse
@@ -83,7 +84,7 @@ class ContentService:
 
         # Generate via AI
         provider = get_ai_provider()
-        candidate_skills = ", ".join(json.loads(profile.skills or "[]"))
+        candidate_skills = ", ".join(safe_parse_list(profile.skills))
         candidate_exp = profile.experiences
         candidate_edu = profile.educations
 

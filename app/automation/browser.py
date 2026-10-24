@@ -16,7 +16,7 @@ from app.automation.schemas import ApplicationStatus, BrowserActionRequest, Brow
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import validate_external_url
-from app.db.models import Application, ApplicationDraft, JobListing, ResumeDocument, UserProfile
+from app.db.models import Application, ApplicationDraft, JobListing, JobMatch, ResumeDocument, UserProfile
 
 logger = get_logger("browser_automation")
 
@@ -41,6 +41,35 @@ class BrowserAutomationService:
                 return a
         return self.generic_adapter
 
+    async def _check_bot_challenge(self, page: Page) -> Tuple[bool, str]:
+        """Detect CAPTCHAs, Cloudflare waiting rooms, or bot verification barriers."""
+        challenge_selectors = [
+            "iframe[src*='recaptcha']",
+            "iframe[src*='hcaptcha']",
+            "iframe[src*='challenges.cloudflare']",
+            ".g-recaptcha",
+            ".h-captcha",
+            "#cf-turnstile",
+            "div[id*='captcha']",
+            "div[class*='captcha']",
+        ]
+        for sel in challenge_selectors:
+            try:
+                locator = page.locator(sel).first
+                if await locator.is_visible(timeout=500):
+                    return True, "Interactive CAPTCHA challenge detected"
+            except Exception:
+                pass
+
+        try:
+            content = (await page.content()).lower()
+            if "please verify you are a human" in content or "checking your browser" in content or "cloudflare ray id" in content:
+                return True, "Cloudflare / Bot protection barrier detected"
+        except Exception:
+            pass
+
+        return False, ""
+
     async def execute_application_flow(self, req: BrowserActionRequest) -> BrowserActionResponse:
         """Run form inspection, mapping, and dry-run/approval submission."""
         # 1. Fetch Job
@@ -54,6 +83,14 @@ class BrowserAutomationService:
         profile = (await self.db.execute(stmt_prof)).scalar_one_or_none()
         if not profile:
             raise ValueError("User profile not found. Please create a profile first.")
+
+        # Pre-application eligibility safety check: do not apply to ineligible roles without explicit override
+        stmt_match = select(JobMatch).where(JobMatch.job_id == job.id, JobMatch.user_id == profile.id)
+        existing_match = (await self.db.execute(stmt_match)).scalar_one_or_none()
+        if existing_match and existing_match.status == "INELIGIBLE" and not req.user_confirmed_submission:
+            raise ValueError(
+                f"Pre-Application Safety Check: Candidate was evaluated as INELIGIBLE for this role ({existing_match.rationale}). Auto-apply is blocked without explicit confirmation."
+            )
 
         # 3. Fetch Resume Document
         resume_doc: Optional[ResumeDocument] = None
@@ -107,19 +144,46 @@ class BrowserAutomationService:
         logger.info(f"Using {adapter.__class__.__name__} for {safe_url}")
 
         async with async_playwright() as p:
-            browser: Browser = await p.chromium.launch(
-                headless=self.settings.browser_headless,
-                slow_mo=self.settings.browser_slow_mo_ms,
-            )
-            context: BrowserContext = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-            )
-            page: Page = await context.new_page()
-
+            browser: Optional[Browser] = None
+            page: Optional[Page] = None
             try:
+                browser = await p.chromium.launch(
+                    headless=self.settings.browser_headless,
+                    slow_mo=self.settings.browser_slow_mo_ms,
+                )
+                context: BrowserContext = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
                 logger.info(f"Navigating to {safe_url}...")
                 app_record.last_step = f"Opening {safe_url}"
                 await page.goto(safe_url, timeout=self.settings.browser_timeout_ms, wait_until="domcontentloaded")
+
+                # Check for bot challenge or CAPTCHA
+                is_challenged, challenge_reason = await self._check_bot_challenge(page)
+                if is_challenged:
+                    app_record.status = ApplicationStatus.MANUAL_ACTION_REQUIRED.value
+                    app_record.error_message = challenge_reason
+                    app_record.last_step = f"Manual intervention required: {challenge_reason}"
+                    challenge_ss = self.settings.screenshots_dir / f"challenge_app_{app_record.id}.png"
+                    try:
+                        await page.screenshot(path=str(challenge_ss))
+                        screenshot_rel_path = str(challenge_ss)
+                    except Exception:
+                        pass
+                    await self.db.commit()
+                    if browser is not None:
+                        await browser.close()
+                    return BrowserActionResponse(
+                        application_id=app_record.id,
+                        job_id=job.id,
+                        status=ApplicationStatus.MANUAL_ACTION_REQUIRED,
+                        last_step=app_record.last_step,
+                        screenshot_path=screenshot_rel_path,
+                        requires_user_approval=False,
+                        error_message=challenge_reason,
+                        message=f"Bot protection or CAPTCHA detected ({challenge_reason}). Please complete application manually at {safe_url}.",
+                    )
 
                 # Fill form fields
                 app_record.last_step = "Filling form fields"
@@ -235,15 +299,20 @@ class BrowserAutomationService:
                 app_record.error_message = str(e)
                 app_record.last_step = f"Encountered error: {e}"
 
-                try:
-                    err_ss = self.settings.screenshots_dir / f"error_app_{app_record.id}.png"
-                    await page.screenshot(path=str(err_ss))
-                    screenshot_rel_path = str(err_ss)
-                except Exception:
-                    pass
+                if page is not None:
+                    try:
+                        err_ss = self.settings.screenshots_dir / f"error_app_{app_record.id}.png"
+                        await page.screenshot(path=str(err_ss))
+                        screenshot_rel_path = str(err_ss)
+                    except Exception:
+                        pass
 
                 await self.db.commit()
-                await browser.close()
+                if browser is not None:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
 
                 return BrowserActionResponse(
                     application_id=app_record.id,

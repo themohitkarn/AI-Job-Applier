@@ -35,6 +35,8 @@ async def evaluate_job_match(job_id: int, db: AsyncSession = Depends(get_db)) ->
             "rationale": match_record.rationale,
             "missing_criteria": json.loads(match_record.missing_criteria or "[]"),
             "positive_matches": json.loads(match_record.positive_matches or "[]"),
+            "is_fallback": bool(match_record.is_fallback),
+            "low_information_warning": match_record.low_information_warning,
             "evaluated_at": match_record.evaluated_at.isoformat() if match_record.evaluated_at else None,
         }
     except ValueError as e:
@@ -64,6 +66,8 @@ async def get_match_for_job(job_id: int, db: AsyncSession = Depends(get_db)) -> 
         "rationale": match_record.rationale,
         "missing_criteria": json.loads(match_record.missing_criteria or "[]"),
         "positive_matches": json.loads(match_record.positive_matches or "[]"),
+        "is_fallback": bool(match_record.is_fallback),
+        "low_information_warning": match_record.low_information_warning,
         "evaluated_at": match_record.evaluated_at.isoformat() if match_record.evaluated_at else None,
     }
 
@@ -99,5 +103,7 @@ async def list_matches(
             "rationale": match.rationale,
             "missing_criteria": json.loads(match.missing_criteria or "[]"),
             "positive_matches": json.loads(match.positive_matches or "[]"),
+            "is_fallback": bool(match.is_fallback),
+            "low_information_warning": match.low_information_warning,
         })
     return output
